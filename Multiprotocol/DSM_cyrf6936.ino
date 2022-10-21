@@ -100,7 +100,7 @@ static void __attribute__((unused)) DSM_build_bind_packet()
 		#else
 			packet[12] = num_ch<8? 0xa2 : 0xb2;	// DSMX/2048 1 or 2 packets depending on the number of channels
 		#endif
-	else									// DSMX_2F && DSM_AUTO
+	else									// DSMX_2F && DSM_AUTO && DSMX_3F
 		packet[12] = 0xb2;					// DSMX/2048 2 packets
 	
 
@@ -123,6 +123,10 @@ static void __attribute__((unused)) DSM_initialize_bind_phase()
 
 static void __attribute__((unused)) DSM_update_channels()
 {
+  if (sub_protocol == DSMX_3F) {
+    num_ch = 16;
+    return;
+  }
 	prev_option=option;
 	num_ch=option & 0x0F;				// Remove flags 0x80=max_throw, 0x40=11ms
 
@@ -140,6 +144,46 @@ static void __attribute__((unused)) DSM_update_channels()
 		ch_map[i]=pgm_read_byte_near(&DSM_ch_map_progmem[idx][i]);
 }
 
+uint8_t X_3F_lower_ch_map[14] = {1, 5, 2, 4, 6, 12, 14, 1, 2, 3, 4, 6, 13, 15};
+uint8_t X_3F_upper_ch_map[14] = {0, 7, 3, 8, 9, 11, 10, 0, 7, 3, 8, 9, 11, 10};
+
+static uint16_t __attribute__((unused)) X_3F_value(uint8_t upper, uint8_t i) {
+  static uint8_t step = 0;
+  uint16_t value = 0xffff;
+  uint16_t ch;
+  if (upper) {
+    ch = X_3F_upper_ch_map[step + i];
+  } else {
+    ch = X_3F_lower_ch_map[step + i];
+  }
+  if (i == 6 && upper) {
+    step += 7;
+    if (step > 7) {
+      step = 0;
+    }
+  }
+#ifdef DSM_MAX_THROW
+  value=Channel_data[CH_TAER[ch]];                   // -100%..+100% => 1024..1976us and -125%..+125% => 904..2096us based on Redcon 6 channel DSM2 RX
+#else
+  if(option & 0x80)
+    value=Channel_data[CH_TAER[ch]];                 // -100%..+100% => 1024..1976us and -125%..+125% => 904..2096us based on Redcon 6 channel DSM2 RX
+  else
+    value=convert_channel_16b_nolimit(CH_TAER[ch],0x156,0x6AA,false);  // -100%..+100% => 1100..1900us and -125%..+125% => 1000..2000us based on a DX8 G2 dump
+#endif
+  value &= 0x7ff;
+  if (ch < 12) {
+    value |= ch << 11;
+  } else {
+    value >>= 2;
+    value |= (ch - 12) << 9;
+    value |= (12 << 11);
+  }
+  if (upper && i == 0) {
+    value |= 0x8000;  //Set phase bit on first value
+  }
+  return value;
+}
+
 static void __attribute__((unused)) DSM_build_data_packet(uint8_t upper)
 {
 	uint8_t bits = 11;
@@ -147,7 +191,7 @@ static void __attribute__((unused)) DSM_build_data_packet(uint8_t upper)
 	if(prev_option!=option)
 		DSM_update_channels();
 
-	if (sub_protocol==DSMX_2F || sub_protocol==DSMX_1F)
+	if (sub_protocol==DSMX_2F || sub_protocol==DSMX_1F || sub_protocol == DSMX_3F)
 	{//DSMX
 		packet[0] = cyrfmfg_id[2];
 		packet[1] = cyrfmfg_id[3];
@@ -178,36 +222,41 @@ static void __attribute__((unused)) DSM_build_data_packet(uint8_t upper)
 	#endif
 	for (uint8_t i = 0; i < 7; i++)
 	{	
-		uint8_t idx = ch_map[(upper?7:0) + i];		// 1,5,2,3,0,4	   
-		uint16_t value = 0xffff;
-		if((option&0x40) == 0 && num_ch < 8 && upper)
-			idx=0xff;								// in 22ms do not transmit upper channels if <8, is it the right method???
-		if (idx != 0xff)
-		{
-			/* Spektrum own remotes transmit normal values during bind and actually use this (e.g. Nano CP X) to
-			   select the transmitter mode (e.g. computer vs non-computer radio), so always send normal output */
-			#ifdef DSM_THROTTLE_KILL_CH
-				if(idx==CH1 && kill_ch<=604)
-				{//Activate throttle kill only if channel is throttle and DSM_THROTTLE_KILL_CH below -50%
-					if(kill_ch<CHANNEL_MIN_100)		// restrict val to 0...400
-						kill_ch=0;
-					else
-						kill_ch-=CHANNEL_MIN_100;
-					value=(kill_ch*21)/25;			// kill channel -100%->904us ... -50%->1100us *0x150/400
-				}
-				else
-			#endif
-				#ifdef DSM_MAX_THROW
-					value=Channel_data[CH_TAER[idx]];										// -100%..+100% => 1024..1976us and -125%..+125% => 904..2096us based on Redcon 6 channel DSM2 RX
-				#else
-					if(option & 0x80)
-						value=Channel_data[CH_TAER[idx]];									// -100%..+100% => 1024..1976us and -125%..+125% => 904..2096us based on Redcon 6 channel DSM2 RX
-					else
-						value=convert_channel_16b_nolimit(CH_TAER[idx],0x156,0x6AA,false);	// -100%..+100% => 1100..1900us and -125%..+125% => 1000..2000us based on a DX8 G2 dump
-				#endif
-			if(bits==10) value>>=1;
-			value |= (upper && i==0 ? 0x8000 : 0) | (idx << bits);
-		}	  
+		uint8_t idx;   
+    uint16_t value = 0xffff;
+    if (sub_protocol == DSMX_3F) {
+      value = X_3F_value(upper, i); 
+    } else {
+      idx = ch_map[(upper?7:0) + i];    // 1,5,2,3,0,4  
+  		if((option&0x40) == 0 && num_ch < 8 && upper)
+  			idx=0xff;								// in 22ms do not transmit upper channels if <8, is it the right method???
+  		if (idx != 0xff)
+  		{
+  			/* Spektrum own remotes transmit normal values during bind and actually use this (e.g. Nano CP X) to
+  			   select the transmitter mode (e.g. computer vs non-computer radio), so always send normal output */
+  			#ifdef DSM_THROTTLE_KILL_CH
+  				if(idx==CH1 && kill_ch<=604)
+  				{//Activate throttle kill only if channel is throttle and DSM_THROTTLE_KILL_CH below -50%
+  					if(kill_ch<CHANNEL_MIN_100)		// restrict val to 0...400
+  						kill_ch=0;
+  					else
+  						kill_ch-=CHANNEL_MIN_100;
+  					value=(kill_ch*21)/25;			// kill channel -100%->904us ... -50%->1100us *0x150/400
+  				}
+  				else
+  			#endif
+  				#ifdef DSM_MAX_THROW
+  					value=Channel_data[CH_TAER[idx]];										// -100%..+100% => 1024..1976us and -125%..+125% => 904..2096us based on Redcon 6 channel DSM2 RX
+  				#else
+  					if(option & 0x80)
+  						value=Channel_data[CH_TAER[idx]];									// -100%..+100% => 1024..1976us and -125%..+125% => 904..2096us based on Redcon 6 channel DSM2 RX
+  					else
+  						value=convert_channel_16b_nolimit(CH_TAER[idx],0x156,0x6AA,false);	// -100%..+100% => 1100..1900us and -125%..+125% => 1000..2000us based on a DX8 G2 dump
+  				#endif
+  			if(bits==10) value>>=1;
+  			value |= (upper && i==0 ? 0x8000 : 0) | (idx << bits);
+  		}
+    }	  
 		packet[i*2+2] = value >> 8;
 		packet[i*2+3] = value;
 	}
@@ -342,7 +391,7 @@ uint16_t DSM_callback()
 			if(sub_protocol == DSMR)
 				DSM_set_sop_data_crc(false, true);
 			else
-				DSM_set_sop_data_crc(true, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F);	//prep CH1
+				DSM_set_sop_data_crc(true, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F||sub_protocol==DSMX_3F);	//prep CH1
 			return 10000;
 		case DSM_CH1_WRITE_A:
 			#ifdef MULTI_SYNC
@@ -386,7 +435,7 @@ uint16_t DSM_callback()
 						CYRF_SetTxRxMode(TX_EN);
 					}
 				#endif
-				DSM_set_sop_data_crc(true, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F);	// prep CH2
+				DSM_set_sop_data_crc(true, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F||sub_protocol==DSMX_3F);	// prep CH2
 				phase++;									// change from CH1_CHECK to CH2_WRITE
 				return DSM_CH1_CH2_DELAY - DSM_WRITE_DELAY;
 			}
@@ -448,14 +497,14 @@ uint16_t DSM_callback()
 				phase = DSM_CH1_WRITE_A;					//Transmit lower
 			CYRF_SetTxRxMode(TX_EN);						//TX mode
 			CYRF_WriteRegister(CYRF_29_RX_ABORT, 0x00);		//Clear abort RX operation
-			DSM_set_sop_data_crc(false, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F||sub_protocol==DSMR);
+			DSM_set_sop_data_crc(false, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F||sub_protocol==DSMR||sub_protocol==DSMX_3F);
 			return DSM_READ_DELAY;
 #else
 			// No telemetry
-			DSM_set_sop_data_crc(phase==DSM_CH1_CHECK_A||phase==DSM_CH1_CHECK_B, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F);
+			DSM_set_sop_data_crc(phase==DSM_CH1_CHECK_A||phase==DSM_CH1_CHECK_B, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F||sub_protocol==DSMX_3F);
 			if (phase == DSM_CH2_CHECK_A)
 			{
-				if(num_ch > 7 || sub_protocol==DSM2_2F || sub_protocol==DSMX_2F)
+				if(num_ch > 7 || sub_protocol==DSM2_2F || sub_protocol==DSMX_2F||sub_protocol==DSMX_3F)
 					phase = DSM_CH1_WRITE_B;				//11ms mode or upper to transmit change from CH2_CHECK_A to CH1_WRITE_A
 				else										
 				{											//Normal mode 22ms
@@ -535,7 +584,7 @@ void DSM_init()
 	seed = (cyrfmfg_id[0] << 8) + cyrfmfg_id[1];
 
 	//Hopping frequencies
-	if (sub_protocol == DSMX_2F || sub_protocol == DSMX_1F)
+	if (sub_protocol == DSMX_2F || sub_protocol == DSMX_1F || sub_protocol == DSMX_3F)
 		DSM_calc_dsmx_channel();
 	else if(sub_protocol != DSMR)
 	{ 

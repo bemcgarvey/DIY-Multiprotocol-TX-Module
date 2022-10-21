@@ -41,7 +41,7 @@
 //Modify the channel order based on your TX: AETR, TAER, RETA...
 //Examples: Flysky & DEVO is AETR, JR/Spektrum radio is TAER, Multiplex is AERT...
 //Default is AETR.
-#define AETR
+#define TAER
 
 //Uncomment to reverse the direction of the specified channel for all protocols
 //#define REVERSE_AILERON
@@ -266,7 +266,7 @@
 #define	XK_CCNRF_INO
 
 //The protocols below need a SX1276 to be installed
-#define	FRSKYR9_SX1276_INO
+//#define	FRSKYR9_SX1276_INO
 
 /***************************/
 /*** PROTOCOLS SETTINGS  ***/
@@ -281,7 +281,7 @@
 // You can disable this feature by adding "//" on the line below. You have to specify which channel (14 by default) will be used to kill the throttle channel.
 // If the channel 14 is above -50% the throttle is untouched but if it is between -50% and -100%, the throttle output will be forced between -100% and -150%.
 // For example, a value of -80% applied on channel 14 will instantly kill the motors on the X-Vert.
-#define DSM_THROTTLE_KILL_CH 14 
+//#define DSM_THROTTLE_KILL_CH 14 
 
 //Enable DSM Forward Programming
 #define DSM_FWD_PGM
@@ -314,9 +314,9 @@
 //A 9XR_PRO running erskyTX will work with both commented and uncommented depending on the radio setting Invert COM1 under the Telemetry menu.
 //On other addon/replacement boards like the 9xtreme board or the Ar9x board running erskyTX, you need to uncomment the line below.
 //For er9x it depends if you have an inveter mod or not on the telemetry pin. If you don't have an inverter comment this line.
-#define INVERT_TELEMETRY
+//#define INVERT_TELEMETRY
 //For STM32 and OrangeRX modules, comment to prevent the TX from forcing the serial telemetry polarity normal/invert.
-#define INVERT_TELEMETRY_TX
+//#define INVERT_TELEMETRY_TX
 
 //Sends Multi status and allow OpenTX and erskyTX to autodetect the telemetry format. Comment to disable.
 #define MULTI_TELEMETRY
@@ -360,7 +360,7 @@
 // On a STM32 module and with a simple hardware modification, you can go around this limitation using CPPM to send the trainer information to the radio.
 // Hardware modification: add a 1K resistor between the STM32 USART1 TX pin (Boot0 programming TX pin) and the radio bay pin 2.
 //Comment to disable
-#define SEND_CPPM
+//#define SEND_CPPM
 
 /****************************/
 /*** SERIAL MODE SETTINGS ***/
@@ -378,7 +378,7 @@
 /*************************/
 //In this section you can configure all details about PPM.
 //If you do not plan to use the PPM mode comment this line using "//" to save Flash space, you don't need to configure anything below in this case
-#define ENABLE_PPM
+//#define ENABLE_PPM
 
 /** TX END POINTS **/
 //It is important for the module to know the endpoints of your radio.

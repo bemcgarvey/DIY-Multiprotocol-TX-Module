@@ -167,7 +167,8 @@ enum DSM
 	DSMX_1F		= 2,
 	DSMX_2F		= 3,
 	DSM_AUTO	= 4,
-	DSMR		= 5,
+	DSMR		  = 5,
+  DSMX_3F   = 6,
 };
 enum YD717
 {       			

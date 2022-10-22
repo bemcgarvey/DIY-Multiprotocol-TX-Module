@@ -169,6 +169,7 @@ enum DSM
 	DSM_AUTO	= 4,
 	DSMR		  = 5,
   DSMX_3F   = 6,
+  DSMX_4F   = 7,
 };
 enum YD717
 {       			
@@ -960,6 +961,8 @@ Serial: 100000 Baud 8e2      _ xxxx xxxx p --
 			DSMX_1F 	2
 			DSMX_2F 	3
 			DSM_AUTO	4
+      DSMX_3F   6
+      DSMX_4F   7
 		sub_protocol==YD717
 			YD717		0
 			SKYWLKR		1

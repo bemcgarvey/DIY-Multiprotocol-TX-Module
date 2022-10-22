@@ -100,7 +100,7 @@ static void __attribute__((unused)) DSM_build_bind_packet()
 		#else
 			packet[12] = num_ch<8? 0xa2 : 0xb2;	// DSMX/2048 1 or 2 packets depending on the number of channels
 		#endif
-	else									// DSMX_2F && DSM_AUTO && DSMX_3F
+	else									// DSMX_2F && DSM_AUTO && DSMX_3F && DSMX_4F
 		packet[12] = 0xb2;					// DSMX/2048 2 packets
 	
 
@@ -123,7 +123,7 @@ static void __attribute__((unused)) DSM_initialize_bind_phase()
 
 static void __attribute__((unused)) DSM_update_channels()
 {
-  if (sub_protocol == DSMX_3F) {
+  if (sub_protocol == DSMX_3F || sub_protocol == DSMX_4F) {
     num_ch = 16;
     return;
   }
@@ -175,6 +175,7 @@ static uint16_t __attribute__((unused)) X_3F_value(uint8_t upper, uint8_t i) {
     value |= ch << 11;
   } else {
     value >>= 2;
+    //TODO this only works for channels <= 16 which is fine for now but if we ever go to 20 channels needs to be fixed.
     value |= (ch - 12) << 9;
     value |= (12 << 11);
   }
@@ -184,6 +185,114 @@ static uint16_t __attribute__((unused)) X_3F_value(uint8_t upper, uint8_t i) {
   return value;
 }
 
+static uint16_t lastValues[NUM_CHN];
+static uint16_t channelQueue;
+static uint8_t qBegin = 0;
+static uint8_t extra[] = {1, 5, 2, 3, 6, 4, 0, 7};
+static uint8_t nextExtra = 0;
+static uint16_t channelList;
+static int currentPos;
+static uint16_t bitFlag;
+
+static uint16_t __attribute__((unused)) X_4F_value(uint8_t upper, uint8_t i) {
+  uint16_t value = 0xffff;
+  uint16_t ch;
+  if (i == 0) {
+    bitFlag = 1;
+    //If this is first value then check for changes
+    for (int j = 0; j < NUM_CHN; ++j) {
+      if (Channel_data[j] != lastValues[j]) {
+          channelQueue |= bitFlag;
+          lastValues[j] = Channel_data[j];
+      }
+      bitFlag <<= 1;
+    }
+    //Build channel list
+    int count = 0;
+    int pos = qBegin;
+    int newBegin = -1;
+    bitFlag = 1 << pos;
+    channelList = 0;
+    while (count < 7) {
+      if (upper == 0) { //phase 0 so all channels available
+        if (channelQueue & bitFlag) {
+          channelList |= bitFlag;
+          channelQueue &= ~bitFlag;
+          ++count;
+        }
+      } else { //phase 1 so only channels <= 12
+        if (channelQueue & bitFlag) {
+          if (pos < 12) {
+            channelList |= bitFlag;
+            channelQueue &= ~bitFlag;
+            ++count;
+          } else {
+            newBegin = pos;
+            pos = -1;
+          }      
+        }
+      }
+      ++pos;
+      if (pos == NUM_CHN) {
+        pos = 0;
+      }
+      if (pos == 0) {
+        bitFlag = 1;
+      } else {
+        bitFlag <<= 1;
+      }
+      if (pos == qBegin) {
+        break;
+      }
+    }
+    if (newBegin != -1) {
+      qBegin = newBegin;
+    } else {
+      qBegin = pos;
+    }
+    while (count < 7) {
+      bitFlag = 1 << extra[nextExtra];
+      if (!(channelList & bitFlag)) {
+        channelList |= bitFlag;
+        ++count;
+      }
+      ++nextExtra;
+      if (nextExtra == 8) {
+        nextExtra = 0;
+      }
+    }
+    currentPos = 0;
+    bitFlag = 1;
+  }
+  while (!(bitFlag & channelList)) {
+    ++currentPos;
+    bitFlag <<= 1;
+  }
+  ch = currentPos;
+  ++currentPos;
+  bitFlag <<= 1;
+#ifdef DSM_MAX_THROW
+  value=Channel_data[CH_TAER[ch]];                   // -100%..+100% => 1024..1976us and -125%..+125% => 904..2096us based on Redcon 6 channel DSM2 RX
+#else
+  if(option & 0x80)
+    value=Channel_data[CH_TAER[ch]];                 // -100%..+100% => 1024..1976us and -125%..+125% => 904..2096us based on Redcon 6 channel DSM2 RX
+  else
+    value=convert_channel_16b_nolimit(CH_TAER[ch],0x156,0x6AA,false);  // -100%..+100% => 1100..1900us and -125%..+125% => 1000..2000us based on a DX8 G2 dump
+#endif
+  value &= 0x7ff;
+  if (ch < 12) {
+    value |= ch << 11;
+  } else {
+    value >>= 2;
+    //TODO this only works for channels <= 16 which is fine for now but if we ever go to 20 channels needs to be fixed.
+    value |= (ch - 12) << 9;
+    value |= (12 << 11);
+  }
+  if (upper && i == 0) {
+    value |= 0x8000;  //Set phase bit on first value
+  }
+}
+
 static void __attribute__((unused)) DSM_build_data_packet(uint8_t upper)
 {
 	uint8_t bits = 11;
@@ -191,7 +300,7 @@ static void __attribute__((unused)) DSM_build_data_packet(uint8_t upper)
 	if(prev_option!=option)
 		DSM_update_channels();
 
-	if (sub_protocol==DSMX_2F || sub_protocol==DSMX_1F || sub_protocol == DSMX_3F)
+	if (sub_protocol==DSMX_2F || sub_protocol==DSMX_1F || sub_protocol == DSMX_3F || sub_protocol == DSMX_4F)
 	{//DSMX
 		packet[0] = cyrfmfg_id[2];
 		packet[1] = cyrfmfg_id[3];
@@ -225,7 +334,9 @@ static void __attribute__((unused)) DSM_build_data_packet(uint8_t upper)
 		uint8_t idx;   
     uint16_t value = 0xffff;
     if (sub_protocol == DSMX_3F) {
-      value = X_3F_value(upper, i); 
+      value = X_3F_value(upper, i);
+    } else if (sub_protocol == DSMX_4F) {
+      value = X_4F_value(upper, i); 
     } else {
       idx = ch_map[(upper?7:0) + i];    // 1,5,2,3,0,4  
   		if((option&0x40) == 0 && num_ch < 8 && upper)
@@ -391,7 +502,7 @@ uint16_t DSM_callback()
 			if(sub_protocol == DSMR)
 				DSM_set_sop_data_crc(false, true);
 			else
-				DSM_set_sop_data_crc(true, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F||sub_protocol==DSMX_3F);	//prep CH1
+				DSM_set_sop_data_crc(true, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F || sub_protocol == DSMX_3F || sub_protocol == DSMX_4F);	//prep CH1
 			return 10000;
 		case DSM_CH1_WRITE_A:
 			#ifdef MULTI_SYNC
@@ -435,7 +546,7 @@ uint16_t DSM_callback()
 						CYRF_SetTxRxMode(TX_EN);
 					}
 				#endif
-				DSM_set_sop_data_crc(true, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F||sub_protocol==DSMX_3F);	// prep CH2
+				DSM_set_sop_data_crc(true, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F || sub_protocol == DSMX_3F || sub_protocol == DSMX_4F);	// prep CH2
 				phase++;									// change from CH1_CHECK to CH2_WRITE
 				return DSM_CH1_CH2_DELAY - DSM_WRITE_DELAY;
 			}
@@ -497,14 +608,14 @@ uint16_t DSM_callback()
 				phase = DSM_CH1_WRITE_A;					//Transmit lower
 			CYRF_SetTxRxMode(TX_EN);						//TX mode
 			CYRF_WriteRegister(CYRF_29_RX_ABORT, 0x00);		//Clear abort RX operation
-			DSM_set_sop_data_crc(false, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F||sub_protocol==DSMR||sub_protocol==DSMX_3F);
+			DSM_set_sop_data_crc(false, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F||sub_protocol==DSMR || sub_protocol == DSMX_3F || sub_protocol == DSMX_4F);
 			return DSM_READ_DELAY;
 #else
 			// No telemetry
-			DSM_set_sop_data_crc(phase==DSM_CH1_CHECK_A||phase==DSM_CH1_CHECK_B, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F||sub_protocol==DSMX_3F);
+			DSM_set_sop_data_crc(phase==DSM_CH1_CHECK_A||phase==DSM_CH1_CHECK_B, sub_protocol==DSMX_2F||sub_protocol==DSMX_1F || sub_protocol == DSMX_3F || sub_protocol == DSMX_4F);
 			if (phase == DSM_CH2_CHECK_A)
 			{
-				if(num_ch > 7 || sub_protocol==DSM2_2F || sub_protocol==DSMX_2F||sub_protocol==DSMX_3F)
+				if(num_ch > 7 || sub_protocol==DSM2_2F || sub_protocol==DSMX_2F || sub_protocol == DSMX_3F || sub_protocol == DSMX_4F)
 					phase = DSM_CH1_WRITE_B;				//11ms mode or upper to transmit change from CH2_CHECK_A to CH1_WRITE_A
 				else										
 				{											//Normal mode 22ms
@@ -555,6 +666,13 @@ const uint8_t PROGMEM DSMR_ID_FREQ[][4 + 23] = {
 
 void DSM_init()
 { 
+  if (sub_protocol == DSMX_4F) {
+    qBegin = 0;
+    nextExtra = 0;
+    for (int i = 0; i < NUM_CHN; ++i) {
+        lastValues[i] == 0xffff;
+    }
+  }
 	if(sub_protocol == DSMR)
 	{
 		uint8_t row = rx_tx_addr[3]%22;
@@ -584,7 +702,7 @@ void DSM_init()
 	seed = (cyrfmfg_id[0] << 8) + cyrfmfg_id[1];
 
 	//Hopping frequencies
-	if (sub_protocol == DSMX_2F || sub_protocol == DSMX_1F || sub_protocol == DSMX_3F)
+	if (sub_protocol == DSMX_2F || sub_protocol == DSMX_1F || sub_protocol == DSMX_3F || sub_protocol == DSMX_4F)
 		DSM_calc_dsmx_channel();
 	else if(sub_protocol != DSMR)
 	{ 

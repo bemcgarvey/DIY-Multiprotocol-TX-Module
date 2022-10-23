@@ -144,8 +144,8 @@ static void __attribute__((unused)) DSM_update_channels()
 		ch_map[i]=pgm_read_byte_near(&DSM_ch_map_progmem[idx][i]);
 }
 
-uint8_t X_3F_lower_ch_map[14] = {1, 5, 2, 4, 6, 12, 14, 1, 2, 3, 4, 6, 13, 15};
-uint8_t X_3F_upper_ch_map[14] = {0, 7, 3, 8, 9, 11, 10, 0, 7, 3, 8, 9, 11, 10};
+static uint8_t X_3F_lower_ch_map[14] = {1, 5, 2, 4, 6, 12, 14, 1, 2, 3, 4, 6, 13, 15};
+static uint8_t X_3F_upper_ch_map[14] = {0, 7, 3, 8, 9, 11, 10, 0, 7, 3, 8, 9, 11, 10};
 
 static uint16_t __attribute__((unused)) X_3F_value(uint8_t upper, uint8_t i) {
   static uint8_t step = 0;
@@ -229,6 +229,9 @@ static uint16_t __attribute__((unused)) X_4F_value(uint8_t upper, uint8_t i) {
           } else {
             newBegin = pos;
             pos = -1;
+            if (qBegin > 12) {
+                qBegin = 12;
+            }
           }      
         }
       }
@@ -291,6 +294,7 @@ static uint16_t __attribute__((unused)) X_4F_value(uint8_t upper, uint8_t i) {
   if (upper && i == 0) {
     value |= 0x8000;  //Set phase bit on first value
   }
+  return value;
 }
 
 static void __attribute__((unused)) DSM_build_data_packet(uint8_t upper)
@@ -670,7 +674,7 @@ void DSM_init()
     qBegin = 0;
     nextExtra = 0;
     for (int i = 0; i < NUM_CHN; ++i) {
-        lastValues[i] == 0xffff;
+        lastValues[i] = 0xffff;
     }
   }
 	if(sub_protocol == DSMR)

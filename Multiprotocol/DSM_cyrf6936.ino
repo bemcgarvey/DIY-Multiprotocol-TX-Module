@@ -188,7 +188,8 @@ static uint16_t __attribute__((unused)) X_3F_value(uint8_t upper, uint8_t i) {
 static uint16_t lastValues[NUM_CHN];
 static uint16_t channelQueue;
 static uint8_t qBegin = 0;
-static uint8_t extra[] = {1, 5, 2, 3, 6, 4, 0, 7};
+static uint8_t extra[] = {1, 5, 2, 3, 6, 4, 0, 7, 8, 9, 1, 5, 2, 3, 6, 4, 0, 7, 10, 11, 1, 5, 2, 3, 6, 4, 0, 7, 12, 13, 1, 5, 2, 3, 6, 4, 0, 7, 14, 15};
+#define EXTRA_COUNT 40
 static uint8_t nextExtra = 0;
 static uint16_t channelList;
 static int currentPos;
@@ -254,13 +255,16 @@ static uint16_t __attribute__((unused)) X_4F_value(uint8_t upper, uint8_t i) {
       qBegin = pos;
     }
     while (count < 7) {
-      bitFlag = 1 << extra[nextExtra];
-      if (!(channelList & bitFlag)) {
-        channelList |= bitFlag;
-        ++count;
+      int xch = extra[nextExtra];
+      if (xch < 12 || upper == 0) {
+        bitFlag = 1 << xch;
+        if (!(channelList & bitFlag)) {
+          channelList |= bitFlag;
+          ++count;
+        }
       }
       ++nextExtra;
-      if (nextExtra == 8) {
+      if (nextExtra == EXTRA_COUNT) {
         nextExtra = 0;
       }
     }

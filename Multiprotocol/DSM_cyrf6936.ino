@@ -144,7 +144,7 @@ static void __attribute__((unused)) DSM_update_channels()
 		ch_map[i]=pgm_read_byte_near(&DSM_ch_map_progmem[idx][i]);
 }
 
-static uint8_t X_3F_lower_ch_map[14] = {1, 5, 2, 4, 6, 12, 14, 1, 2, 3, 4, 6, 13, 15};
+static uint8_t X_3F_lower_ch_map[14] = {1, 5, 2, 4, 6, 12, 14, 1, 5, 2, 4, 6, 13, 15};
 static uint8_t X_3F_upper_ch_map[14] = {0, 7, 3, 8, 9, 11, 10, 0, 7, 3, 8, 9, 11, 10};
 
 static uint16_t __attribute__((unused)) X_3F_value(uint8_t upper, uint8_t i) {

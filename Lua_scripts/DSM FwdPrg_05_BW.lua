@@ -1,4 +1,5 @@
 local toolName = "TNS|DSM Forward Prog v0.5 (Text B&W) |TNE"
+local VERSION  = "v0.5"
 
 ---- #########################################################################
 ---- #                                                                       #
@@ -16,18 +17,28 @@ local toolName = "TNS|DSM Forward Prog v0.5 (Text B&W) |TNE"
 ---- # GNU General Public License for more details.                          #
 ---- #                                                                       #
 ---- #########################################################################
+------------------------------------------------------------------------------
+-- This script library is a rewrite of the original DSM forward programming Lua 
+-- Script.  The goal is to make it easier to understand, mantain, and to  
+-- separate the GUI from the DSM Forward  programming engine/logic
+-- in this way, GUIs can evolve independent. OpenTX Gui, EdgeTx GUI, Small Radios, etc.
+
+-- Code is based on the code/work by: Pascal Langer (Author of the Multi-Module)  
+-- Rewrite/Enhancements By: Francisco Arzu 
+------------------------------------------------------------------------------
 
 local SIMULATION_ON = false  -- FALSE: use real communication to DSM RX (DEFAULT), TRUE: use a simulated version of RX 
 local DEBUG_ON = 1           -- 0=NO DEBUG, 1=HIGH LEVEL 2=LOW LEVEL   (Debug logged into the /LOGS/dsm.log)
 local DEBUG_ON_LCD = false   -- Interactive Information on LCD of Menu data from RX 
 
+local DSMLIB_PATH = "/SCRIPTS/TOOLS/DSMLIB/"
 
 local dsmLib
 if (SIMULATION_ON) then
   -- library with SIMILATION VERSION.  Works really well in Companion for GUI development
-  dsmLib = loadScript("/SCRIPTS/TOOLS/DSMLIB/DsmFwPrgSIMLib.lua")(DEBUG_ON)
+  dsmLib = assert(loadScript(DSMLIB_PATH.."DsmFwPrgSIMLib.lua"), "Not-Found: DSMLIB/DsmFwPrgSIMLib.lua")(DEBUG_ON)
 else
-  dsmLib = loadScript("/SCRIPTS/TOOLS/DSMLIB/DsmFwPrgLib.lua")(DEBUG_ON)
+  dsmLib = assert(loadScript(DSMLIB_PATH.."DsmFwPrgLib.lua"),"Not-Found: DSMLIB/DsmFwPrgLib.lua")(DEBUG_ON)
 end
 
 local PHASE = dsmLib.PHASE
@@ -35,6 +46,8 @@ local LINE_TYPE = dsmLib.LINE_TYPE
 local DISP_ATTR = dsmLib.DISP_ATTR
 
 local DSM_Context = dsmLib.DSM_Context
+
+local IS_EDGETX   = false     -- DEFAULT until Init changed it
 
 local LCD_W_USABLE          = LCD_W-10
 -- X for Menu Lines
@@ -62,13 +75,15 @@ local lastRefresh=0         -- Last time the screen was refreshed
 local REFRESH_GUI_MS = 500/10   -- 500ms.. Screen Refresh Rate.. to not use unneded CPU time  (in 10ms units to be compatible with getTime())
 local originalValue = nil
 
+local warningScreenON = true
+
 ------------------------------------------------------------------------------------------------------------
 local function GUI_SwitchSimulationOFF()
   dsmLib.ReleaseConnection()  
   dsmLib.LOG_close()
 
   SIMULATION_ON = false
-  dsmLib = loadScript("/SCRIPTS/TOOLS/DSMLIB/DsmFwPrgLib.lua")(DEBUG_ON)
+  dsmLib = loadScript(DSMLIB_PATH .. "DsmFwPrgLib.lua")(DEBUG_ON)
   DSM_Context = dsmLib.DSM_Context
 
   dsmLib.Init(toolName)  -- Initialize Library 
@@ -125,7 +140,7 @@ local function GUI_Display_Line_Menu(x,y,w,h,line,selected)
 
   if dsmLib.isSelectableLine(line) then  
       -- Menu Line
-      text = text .. "  |>"  --OPENTX
+      text = text .. "  >"  
   else  -- SubHeaders and plain text lines
       if (TEXT_SIZE~=SMLSIZE) then -- ignore bold on small size screens
         bold = (dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR.BOLD) and BOLD) or 0  
@@ -153,9 +168,9 @@ local function GUI_Display_Line_Value(lineNum, line, value, selected, editing)
   ---------- NAME Part 
   local header = line.Text
   -- ONLY do this for Flight Mode (Right Align or Centered)
-  if (dsmLib.isFlightModeText(line.TextId)) then
-      -- Display Header + Value together
-      header = header .. " " .. value
+  if (dsmLib.isFlightModeLine(line)) then
+       -- Display Header + Value together
+       header = dsmLib.GetFlightModeValue(line)
 
       -- Flight mode display attributes
       if (TEXT_SIZE~=SMLSIZE) then -- ignore bold on small size screens
@@ -177,9 +192,8 @@ local function GUI_Display_Line_Value(lineNum, line, value, selected, editing)
   lcd.drawText(x, y, header, bold + TEXT_SIZE) -- display Line Header
 
   --------- VALUE PART,  Skip for Flight Mode since already show the value 
-  if not dsmLib.isFlightModeText(line.TextId) then 
+  if not dsmLib.isFlightModeLine(line) then 
     local attrib    = 0
-    value = value .. (line.Format or "")  -- Append % if needed
 
     if selected then
       attrib = INVERS
@@ -189,11 +203,29 @@ local function GUI_Display_Line_Value(lineNum, line, value, selected, editing)
       end
     end
     
+    value = value .. "  " .. (line.Format or "")  -- Append % if needed
     lcd.drawText(LCD_X_LINE_VALUE,y, value, attrib + TEXT_SIZE) -- display value
   end
 
   if (DEBUG_ON_LCD) then  lcd.drawText(LCD_X_LINE_DEBUG,y, line.MinMaxDebug or "", TEXT_SIZE + WARNING_COLOR) end -- display debug
 end
+
+------------------------------------------------------------------------------------------------------------
+local function GUI_ShowBitmap(x,y,imgData)
+  -- imgData format "bitmap.png|alt message"
+  local f = string.gmatch(imgData, '([^%|]+)') -- Iterator over values split by '|'
+  local imgName, imgMsg = f(), f()
+
+  lcd.drawText(x, y, imgMsg or "")  -- Alternate Image MSG 
+
+  -- NO IMAGES in Text B&W 
+  --local imgPath = IMAGE_PATH .. (imgName or "")
+  --local bitmap  = Bitmap.open(imgPath)
+  --if (bitmap~=nil) then
+  --   lcd.drawBitmap(bitmap, x,y+20)
+  --end
+end
+
 ------------------------------------------------------------------------------------------------------------
 local function GUI_Display()
   local ctx = DSM_Context
@@ -211,7 +243,11 @@ local function GUI_Display()
     end
     --Draw RX Menu
     if ctx.Phase == PHASE.RX_VERSION then
-      lcd.drawText(LCD_X_LINE_TITLE,50,"No compatible DSM RX...", BLINK + TEXT_SIZE)
+      if (ctx.isReset) then
+        lcd.drawText(LCD_X_LINE_TITLE,50,"Waiting for RX to Restart", BLINK + TEXT_SIZE)
+      else
+        lcd.drawText(LCD_X_LINE_TITLE,50,"No compatible DSM RX...", BLINK + TEXT_SIZE)
+      end
     else
       local menu = ctx.Menu
       if menu.Text ~=  nil then
@@ -235,13 +271,11 @@ local function GUI_Display()
               local value = line.Val
               if line.Val ~= nil then
                 if dsmLib.isListLine(line) then    -- for Lists of Strings, get the text
-                  value = dsmLib.Get_Text(line.Val + line.TextStart) -- TextStart is the initial offset for text
-                  local imgValue = dsmLib.Get_Text_Img(line.Val + line.TextStart)   -- Complentary IMAGE for this value to Display??
+                  value = dsmLib.Get_List_Text(line.Val + line.TextStart) -- TextStart is the initial offset for text
+                  local imgData = dsmLib.Get_List_Text_Img(line.Val + line.TextStart)   -- Complentary IMAGE for this value to Display??
                     
-                  if (imgValue) then  -- Optional Image for a Value
-                    --TODO: Pending feature.. create images and put bitmap instead of a message
-                    --Display the image/Alternate Text 
-                    lcd.drawText(LCD_X_LINE_TITLE, LCD_Y_LINE_FIRST+LCD_Y_LINE_HEIGHT, "Img:"..imgValue)
+                  if (imgData) then  -- Optional Image and Msg for value
+                    GUI_ShowBitmap(LCD_X_LINE_TITLE,LCD_Y_LINE_FIRST+LCD_Y_LINE_HEIGHT, imgData)
                   end
                 end
 
@@ -285,10 +319,9 @@ local function GUI_HandleEvent(event, touchState)
     else
       if ctx.isEditing() then  -- Editing a Line, need to  restore original value
         ctx.MenuLines[ctx.EditLine].Val = originalValue        
-        dsmLib.ChangePhase(PHASE.VALUE_CHANGE_END)  -- Update+Validate value in RX 
-        ctx.EditLine = nil   -- Exit Edit Mode (By clearing the line editing)
+        dsmLib.Value_Write_Validate(menuLines[ctx.EditLine])
       else
-        dsmLib.ChangePhase(PHASE.EXIT)
+        dsmLib.ChangePhase(PHASE.EXIT) -- Exit
       end
     end
     return
@@ -350,8 +383,7 @@ local function GUI_HandleEvent(event, touchState)
         -- Editing a Line???? 
         if ctx.isEditing() then
           -- Change the Value and exit edit 
-          ctx.EditLine = nil
-          dsmLib.ChangePhase(PHASE.VALUE_CHANGE_END)
+          dsmLib.Value_Write_Validate(menuLines[ctx.SelLine])
         else
           -- enter Edit the current line  
           ctx.EditLine = ctx.SelLine
@@ -363,6 +395,12 @@ local function GUI_HandleEvent(event, touchState)
 end
 
 local function init_screen_pos()
+    -- osName in OpenTX is nil, otherwise is EDGETX 
+    local ver, radio, maj, minor, rev, osname = getVersion()
+    if (osname==nil) then osname = "OpenTX" end -- OTX 2.3.14 and below returns nil
+
+    IS_EDGETX = string.sub(osname,1,1) =='E'
+
     if LCD_W == 480 then -- TX16
         -- use defaults in the script header
     elseif LCD_W == 128 then --TX12  (128x64) -- Still needs some work on the vertical
@@ -387,6 +425,33 @@ local function init_screen_pos()
     end
 end
 
+local function GUI_Warning(event)
+  lcd.clear()
+  local header = "DSM Forward Programming "..VERSION.."                   "
+  --Draw title
+  lcd.drawFilledRectangle(0, 0, LCD_W, 17, TITLE_BGCOLOR)
+  lcd.drawText(5, 0, header,  MENU_TITLE_COLOR  + TEXT_SIZE)
+
+
+  lcd.drawText(100,20,"WARNING", BLINK+BOLD)
+  lcd.drawText(5,40,"Gyro settings-> Initial Setup and Initial SAFE Setup", BOLD)
+  lcd.drawText(5,70,"Has only been tested with normal wing type and normal tail.", 0)
+  lcd.drawText(5,90,"Make sure that your Gyro/Safe reacts correctly after setup", 0)
+  lcd.drawText(5,110,"with this tool.  If not, set it up with a Spektrum TX.", 0)
+
+  lcd.drawText(5,150,"Gyro settings-> System Setup -> Relearn Servo Setting", BOLD)
+  lcd.drawText(5,180,"Will override Wing type, tail type, servo reverse, etc.", 0)
+  lcd.drawText(5,200,"If this RX was initally setup with a Spektrum Transmiter.", 0)
+
+  lcd.drawText(100,250,"    OK     ", INVERS + BOLD)
+
+  if event == EVT_VIRTUAL_EXIT or event == EVT_VIRTUAL_ENTER then
+    warningScreenON = false
+  end
+
+  return 0
+end
+
 ------------------------------------------------------------------------------------------------------------
 -- Init
 local function DSM_Init()
@@ -409,6 +474,10 @@ local function DSM_Run(event)
     return 2
   end
 
+  if (warningScreenON) then
+    return GUI_Warning(event)
+  end
+
   GUI_HandleEvent(event)
 
   dsmLib.Send_Receive()  -- Handle Send and Receive DSM Forward Programming Messages
@@ -420,8 +489,10 @@ local function DSM_Run(event)
     refreshInterval = 20 -- 200ms
   end
 
+  if (not IS_EDGETX) then -- OPENTX NEEDS REFRESH ON EVERY CYCLE
+    GUI_Display()
   -- Refresh display only if needed and no faster than 500ms, utilize more CPU to speedup DSM communications
-  if (ctx.Refresh_Display and (getTime()-lastRefresh) > refreshInterval) then --300ms from last refresh 
+  elseif (ctx.Refresh_Display and (getTime()-lastRefresh) > refreshInterval) then --300ms from last refresh 
     GUI_Display()
     ctx.Refresh_Display=false
     lastRefresh=getTime()

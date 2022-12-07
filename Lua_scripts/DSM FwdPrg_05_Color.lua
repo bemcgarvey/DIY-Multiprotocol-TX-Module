@@ -17,18 +17,29 @@ local VERSION  = "v0.5"
 ---- # GNU General Public License for more details.                          #
 ---- #                                                                       #
 ---- #########################################################################
+------------------------------------------------------------------------------
+-- This script library is a rewrite of the original DSM forward programming Lua 
+-- Script.  The goal is to make it easier to understand, mantain, and to  
+-- separate the GUI from the DSM Forward  programming engine/logic
+-- in this way, GUIs can evolve independent. OpenTX Gui, EdgeTx GUI, Small Radios, etc.
+
+-- Code is based on the code/work by: Pascal Langer (Author of the Multi-Module)  
+-- Rewrite/Enhancements By: Francisco Arzu 
+------------------------------------------------------------------------------
 
 local SIMULATION_ON = false   -- FALSE: use real communication to DSM RX (DEFAULT), TRUE: use a simulated version of RX 
 local DEBUG_ON = 1           -- 0=NO DEBUG, 1=HIGH LEVEL 2=LOW LEVEL   (Debug logged into the /LOGS/dsm.log)
 local DEBUG_ON_LCD = false   -- Interactive Information on LCD of Menu data from RX 
 local USE_SPECKTRUM_COLORS = true -- true: Use spectrum colors, false: use theme colors (default on OpenTX) 
+local DSMLIB_PATH = "/SCRIPTS/TOOLS/DSMLIB/"
+local IMAGE_PATH = DSMLIB_PATH .. "img/"
 
 local dsmLib
 if (SIMULATION_ON) then
   -- library with SIMILATION VERSION.  Works really well in Companion for GUI development
-  dsmLib = loadScript("/SCRIPTS/TOOLS/DSMLIB/DsmFwPrgSIMLib.lua")(DEBUG_ON)
+  dsmLib = assert(loadScript(DSMLIB_PATH.."DsmFwPrgSIMLib.lua"), "Not-Found: DSMLIB/DsmFwPrgSIMLib.lua")(DEBUG_ON)
 else
-  dsmLib = loadScript("/SCRIPTS/TOOLS/DSMLIB/DsmFwPrgLib.lua")(DEBUG_ON)
+  dsmLib = assert(loadScript(DSMLIB_PATH.."DsmFwPrgLib.lua"),"Not-Found: DSMLIB/DsmFwPrgLib.lua")(DEBUG_ON)
 end
 
 local PHASE = dsmLib.PHASE
@@ -62,7 +73,8 @@ local LCD_Y_LINE_HEIGHT      = (DEBUG_ON_LCD and 23)  or 27   -- if DEBUG 23 els
 
 local LCD_Y_LOWER_BUTTONS    = LCD_Y_LINE_START + 3 + (7 * LCD_Y_LINE_HEIGHT)
 
-
+-- TOOL BG COLOR
+local LCD_TOOL_BGCOLOR        = TEXT_BGCOLOR
 -- TOOL HEADER 
 local LCD_TOOL_HDR_COLOR      = MENU_TITLE_COLOR
 local LCD_TOOL_HDR_BGCOLOR    = TITLE_BGCOLOR
@@ -72,7 +84,7 @@ local LCD_MENU_BGCOLOR        = MENU_TITLE_BGCOLOR
 -- LINE SELECTED 
 local LCD_SELECTED_COLOR      = TEXT_INVERTED_COLOR
 local LCD_SELECTED_BGCOLOR    = TEXT_INVERTED_BGCOLOR
-local LCD_EDIT_BGCOLOR        = WARNING_COLOR 
+local LCD_EDIT_BGCOLOR        = MENU_TITLE_BGCOLOR -- WARNING_COLOR 
 -- NORMAL TEXT  
 local LCD_NORMAL_COLOR        = TEXT_COLOR
 local LCD_DISABLE_COLOR       = TEXT_DISABLE_COLOR
@@ -81,11 +93,12 @@ local LCD_DEBUG_COLOR         = LINE_COLOR
 local LCD_BOX_COLOR           = TEXT_DISABLE_COLOR  
 
 
+local warningScreenON = true
+
 
 --------------------- lcd.sizeText replacement -------------------------------------------------
 -- EdgeTx dont have lcd.sizeText, so we do an equivalent one using the string length and 5px per character
 local function my_lcd_sizeText(s)
-  print(string.format("EdgeTX=%s",IS_EDGETX))
   -- return: If IS_EDGETX then lcd.sizeText() else string.len()
   return (IS_EDGETX and lcd.sizeText(s)) or (string.len(s)*10)  
 end
@@ -96,7 +109,7 @@ local function GUI_SwitchSimulationOFF()
   dsmLib.LOG_close()
 
   SIMULATION_ON = false
-  dsmLib = loadScript("/SCRIPTS/TOOLS/DSMLIB/DsmFwPrgLib.lua")(DEBUG_ON)
+  dsmLib = loadScript(DSMLIB_PATH .. "DsmFwPrgLib.lua")(DEBUG_ON)
   DSM_Context = dsmLib.DSM_Context
 
   dsmLib.Init(toolName)  -- Initialize Library 
@@ -145,7 +158,7 @@ end
 
 --------------------------------------------------------------------------------------------------------
 -- Display Text inside a Rectangle.  Inv: true means solid rectangle, false=only perimeter
-local function GUI_Display_Boxed_Text(lineNum,x,y,w,h,text,inv)
+local function GUI_Display_Boxed_Text(lineNum,x,y,w,h,text,inv, isNumber)
   local ctx = DSM_Context
   local txtColor  = GUI_GetTextColor(lineNum)
   local frameColor = GUI_GetFrameColor(lineNum)
@@ -158,13 +171,16 @@ local function GUI_Display_Boxed_Text(lineNum,x,y,w,h,text,inv)
   else
     lcd.drawRectangle(x-5, y-2, w, h, frameColor)
   end
-  lcd.drawText(x , y, text, txtColor) 
-
+  if (isNumber) then
+    lcd.drawNumber(x+w-10 , y, text, txtColor + RIGHT)
+  else
+    lcd.drawText(x , y, text, txtColor) 
+  end
 end
 
 ------ Display Pre/Next/Back buttons
 local function GUI_Diplay_Button(x,y,w,h,text,selected)
-  GUI_Display_Boxed_Text(-1,x,y,w,h,text,selected)
+  GUI_Display_Boxed_Text(-1,x,y,w,h,text,selected, false)
 end
 
 ------ Display MENU type of lines (Navigation, SubHeaders, and plain text comments)
@@ -177,7 +193,7 @@ local function GUI_Display_Line_Menu(lineNum,line,selected)
   local x = LCD_X_LINE_MENU
  
   if dsmLib.isSelectableLine(line) then -- Draw Selectable Menus in Boxes
-    GUI_Display_Boxed_Text(lineNum,x, y, LCD_W_LINE_MENU, LCD_Y_LINE_HEIGHT, line.Text,selected)
+    GUI_Display_Boxed_Text(lineNum,x, y, LCD_W_LINE_MENU, LCD_Y_LINE_HEIGHT, line.Text,selected, false)
     GUI_addTouchButton(x, y, LCD_W_LINE_MENU, LCD_Y_LINE_HEIGHT,lineNum)
   else
     -- Non Selectable Menu Lines, plain text
@@ -205,16 +221,12 @@ local function GUI_Display_Line_Value(lineNum, line, value, selected, editing)
   local y = LCD_Y_LINE_START+(LCD_Y_LINE_HEIGHT*lineNum)
   local x = LCD_X_LINE_TITLE
 
-  --if (editing) then -- Any Special color/effect when editing??
-  --  value = "["..value .. "]"
-  --end
-
   ---------- NAME Part 
   local header = line.Text
   -- ONLY do this for Flight Mode (Right Align or Centered)
-  if (dsmLib.isFlightModeText(line.TextId)) then
+  if (dsmLib.isFlightModeLine(line)) then
       -- Display Header + Value together
-      header = header .. " " .. value
+      header = dsmLib.GetFlightModeValue(line)
 
       -- Bold Text???
       bold = (dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR.BOLD) and BOLD) or 0
@@ -234,14 +246,17 @@ local function GUI_Display_Line_Value(lineNum, line, value, selected, editing)
   lcd.drawText(x, y, header, txtColor + bold) -- display Line Header
 
   --------- VALUE PART,  Skip for Flight Mode since already show the value 
-  if not dsmLib.isFlightModeText(line.TextId) then 
-    value = value .. (line.Format or "")  -- Append % if needed
-    
+  if not dsmLib.isFlightModeLine(line) then     
     if dsmLib.isSelectableLine(line) then 
+      --if (editing) then -- Any Special color/effect when editing??
+      --  value = "["..value .. "]"
+      --end
       -- Can select/edit value, Box it 
-      local tw = my_lcd_sizeText(value)+10 -- Width of the Text in the lcd
-      GUI_Display_Boxed_Text(lineNum,LCD_X_LINE_VALUE,y,tw,LCD_Y_LINE_HEIGHT,value,selected)
+      local tw = math.max(my_lcd_sizeText(value)+10,45) -- Width of the Text in the lcd
+      GUI_Display_Boxed_Text(lineNum,LCD_X_LINE_VALUE,y,tw,LCD_Y_LINE_HEIGHT,value,selected, not dsmLib.isListLine(line))
       GUI_addTouchButton(LCD_X_LINE_VALUE,y,tw,LCD_Y_LINE_HEIGHT,lineNum)
+
+      lcd.drawText(LCD_X_LINE_VALUE+tw+5, y,  (line.Format or ""), txtColor + bold)
     else -- Not Editable, Plain Text 
       lcd.drawText(LCD_X_LINE_VALUE, y, value, txtColor)
     end
@@ -327,10 +342,24 @@ local function GUI_Display_Edit_Buttons(line)
 
 end
 
+local function GUI_ShowBitmap(x,y,imgData)
+    -- imgData format "bitmap.png|alt message"
+    local f = string.gmatch(imgData, '([^%|]+)') -- Iterator over values split by '|'
+    local imgName, imgMsg = f(), f()
+
+    lcd.drawText(x, y, imgMsg or "")  -- Alternate Image MSG 
+
+    local imgPath = IMAGE_PATH .. (imgName or "")
+    local bitmap  = Bitmap.open(imgPath)
+    if (bitmap~=nil) then
+       lcd.drawBitmap(bitmap, x,y+20)
+    end
+end
+
 ------------------------------------------------------------------------------------------------------------
 local function GUI_Display()
   local ctx = DSM_Context
-  lcd.clear()
+  lcd.clear(LCD_TOOL_BGCOLOR)
   GUI_clearTouchButtons()
  
   if LCD_W == 480 then
@@ -344,7 +373,11 @@ local function GUI_Display()
     lcd.drawText(5, 0, header,  LCD_TOOL_HDR_COLOR + SMLSIZE)
     --Draw RX Menu
     if ctx.Phase == PHASE.RX_VERSION then
-      lcd.drawText(LCD_X_LINE_TITLE,100,"No compatible DSM RX...", BLINK)
+      if (ctx.isReset) then
+        lcd.drawText(LCD_X_LINE_TITLE,100,"Waiting for RX to Restart", BLINK)
+      else
+        lcd.drawText(LCD_X_LINE_TITLE,100,"No compatible DSM RX...", BLINK)
+      end
     else
       local menu = ctx.Menu
       
@@ -364,18 +397,15 @@ local function GUI_Display()
             if line.Type == LINE_TYPE.MENU then 
               GUI_Display_Line_Menu(i, line, i == ctx.SelLine)
             else  
-              -- list/value line 
-              local value, imgValue   = line.Val, nil
-
               if line.Val ~= nil then
+                local value = line.Val
+
                 if dsmLib.isListLine(line) then    -- for Lists of Strings, get the text
-                  value = dsmLib.Get_Text(line.Val + line.TextStart) -- TextStart is the initial offset for text
-                  imgValue = dsmLib.Get_Text_Img(line.Val + line.TextStart)   -- Complentary IMAGE for this value to Display??
+                  value = dsmLib.Get_List_Text(line.Val + line.TextStart) -- TextStart is the initial offset for text
+                  local imgData = dsmLib.Get_List_Text_Img(line.Val + line.TextStart)   -- Complentary IMAGE for this value to Display??
                     
-                  if (imgValue) then  -- Optional Image for a Value
-                    --TODO: Pending feature.. create images and put bitmap instead of a message
-                    --Display the image/Alternate Text 
-                    lcd.drawText(LCD_X_LINE_TITLE, LCD_Y_LINE_START+LCD_Y_LINE_HEIGHT, "Img:"..imgValue)
+                  if (imgData) then  -- Optional Image and Msg for value
+                    GUI_ShowBitmap(LCD_X_LINE_TITLE,LCD_Y_LINE_START, imgData)
                   end
                 end
 
@@ -386,6 +416,7 @@ local function GUI_Display()
         end  -- for
 
         if IS_EDGETX and ctx.isEditing()  then
+          -- Display Touch button for Editing values
           GUI_Display_Edit_Buttons(ctx.MenuLines[ctx.EditLine])
         end
       end 
@@ -393,6 +424,7 @@ local function GUI_Display()
   else
     -- Different Resolution.. Maybe just adjusting some of the constants will work, adjust it in DSM_Init??
     -- LCD_X_LINE_TITLE,  LCD_Y_LINE_START, etc
+    lcd.drawText(LCD_X_LINE_TITLE,100,"Only supported in Color Radios of 480 resolution", BLINK)
   end
 end
 
@@ -467,7 +499,7 @@ local function GUI_HandleEvent(event, touchState)
           end
         end
     end
-  end
+  end -- IS_EDGETX
 
   if event == EVT_VIRTUAL_EXIT then
     ctx.Refresh_Display=true
@@ -476,9 +508,9 @@ local function GUI_HandleEvent(event, touchState)
       dsmLib.ReleaseConnection()  -- Just Exit the Script 
     else
       if ctx.isEditing() then  -- Editing a Line, need to  restore original value
-        ctx.MenuLines[ctx.EditLine].Val = originalValue
-        dsmLib.ChangePhase(PHASE.VALUE_CHANGE_END) -- Update + Validate value in RX 
-        ctx.EditLine = nil   -- Exit Edit Mode (By clearing the line editing)
+        local line = ctx.MenuLines[ctx.EditLine]
+        line.Val = originalValue
+        dsmLib.Value_Write_Validate(line)
       else
         dsmLib.ChangePhase(PHASE.EXIT)
       end
@@ -540,8 +572,7 @@ local function GUI_HandleEvent(event, touchState)
         end
       else -- Enter on a Value
         if ctx.isEditing() then   -- already editing a Line???? 
-          ctx.EditLine = nil   -- Exit Edit Mode (By clearing the line editing)
-          dsmLib.ChangePhase(PHASE.VALUE_CHANGE_END) -- Request change the value on RX 
+          dsmLib.Value_Write_Validate(menuLines[ctx.SelLine])
         else    -- Edit the current value  
           ctx.EditLine = ctx.SelLine
           originalValue = menuLines[ctx.SelLine].Val
@@ -554,13 +585,16 @@ end
 local function init_colors()
   -- osName in OpenTX is nil, otherwise is EDGETX 
   local ver, radio, maj, minor, rev, osname = getVersion()
-  IS_EDGETX = osname~=nil
+  if (osname==nil) then osname = "OpenTX" end -- OTX 2.3.14 and below returns nil
+
+  IS_EDGETX = string.sub(osname,1,1) == 'E'
 
   if (IS_EDGETX and USE_SPECKTRUM_COLORS) then
       -- SPECKTRUM COLORS (only works on EDGETX)
+      LCD_TOOL_BGCOLOR        = LIGHTWHITE
       -- TOOL HEADER 
-      LCD_TOOL_HDR_COLOR      = MENU_TITLE_COLOR
-      LCD_TOOL_HDR_BGCOLOR    = TITLE_BGCOLOR
+      LCD_TOOL_HDR_COLOR      = WHITE
+      LCD_TOOL_HDR_BGCOLOR    = DARKBLUE
       -- MENU HEADER
       LCD_MENU_COLOR          = WHITE
       LCD_MENU_BGCOLOR        = DARKGREY
@@ -575,6 +609,33 @@ local function init_colors()
       -- NORMAL BOX FRAME COLOR 
       LCD_BOX_COLOR           = LIGHTGREY  
   end
+end
+
+local function GUI_Warning(event,touchState)
+  lcd.clear(LCD_TOOL_BGCOLOR)
+  local header = "DSM Forward Programming "..VERSION.."                   "
+  --Draw title
+  lcd.drawFilledRectangle(0, 0, LCD_W, 17, LCD_TOOL_HDR_BGCOLOR)
+  lcd.drawText(5, 0, header,  LCD_TOOL_HDR_COLOR + SMLSIZE)
+
+
+  lcd.drawText(100,20,"WARNING", BLINK+BOLD)
+  lcd.drawText(5,40,"Gyro settings-> Initial Setup and Initial SAFE Setup", BOLD)
+  lcd.drawText(5,70,"Has only been tested with normal wing type and normal tail.", 0)
+  lcd.drawText(5,90,"Make sure that your Gyro/Safe reacts correctly after setup", 0)
+  lcd.drawText(5,110,"with this tool.  If not, set it up with a Spektrum TX.", 0)
+
+  lcd.drawText(5,150,"Gyro settings-> System Setup -> Relearn Servo Setting", BOLD)
+  lcd.drawText(5,180,"Will override Wing type, tail type, servo reverse, etc.", 0)
+  lcd.drawText(5,200,"If this RX was initally setup with a Spektrum Transmiter.", 0)
+
+  lcd.drawText(100,250,"    OK     ", INVERS + BOLD)
+
+  if event == EVT_VIRTUAL_EXIT or event == EVT_VIRTUAL_ENTER or event == EVT_TOUCH_TAP then
+    warningScreenON = false
+  end
+
+  return 0
 end
 
 ------------------------------------------------------------------------------------------------------------
@@ -596,6 +657,10 @@ local function DSM_Run(event,touchState)
     return 2
   end
 
+  if (warningScreenON) then
+    return GUI_Warning(event,touchState)
+  end
+
   GUI_HandleEvent(event,touchState)
 
   dsmLib.Send_Receive()  -- Handle Send and Receive DSM Forward Programming Messages
@@ -608,8 +673,10 @@ local function DSM_Run(event,touchState)
     refreshInterval = 20 -- 200ms
   end
 
+  if (not IS_EDGETX) then -- OPENTX NEEDS REFRESH ON EVERY CYCLE
+    GUI_Display()
   -- Refresh display only if needed and no faster than 300ms, utilize more CPU to speedup DSM communications
-  if (ctx.Refresh_Display and (getTime()-lastRefresh) > refreshInterval) then --300ms from last refresh 
+  elseif (ctx.Refresh_Display and (getTime()-lastRefresh) > refreshInterval) then --300ms from last refresh 
     GUI_Display()
     ctx.Refresh_Display=false
     lastRefresh=getTime()

@@ -1,5 +1,5 @@
-local toolName = "TNS|DSM Forward Prog v0.5 (Color+Touch) |TNE"
-local VERSION  = "v0.5"
+local toolName = "TNS|DSM Forward Prog v0.53 (Color+Touch) |TNE"
+local VERSION  = "v0.53"
 
 ---- #########################################################################
 ---- #                                                                       #
@@ -34,13 +34,7 @@ local USE_SPECKTRUM_COLORS = true -- true: Use spectrum colors, false: use theme
 local DSMLIB_PATH = "/SCRIPTS/TOOLS/DSMLIB/"
 local IMAGE_PATH = DSMLIB_PATH .. "img/"
 
-local dsmLib
-if (SIMULATION_ON) then
-  -- library with SIMILATION VERSION.  Works really well in Companion for GUI development
-  dsmLib = assert(loadScript(DSMLIB_PATH.."DsmFwPrgSIMLib.lua"), "Not-Found: DSMLIB/DsmFwPrgSIMLib.lua")(DEBUG_ON)
-else
-  dsmLib = assert(loadScript(DSMLIB_PATH.."DsmFwPrgLib.lua"),"Not-Found: DSMLIB/DsmFwPrgLib.lua")(DEBUG_ON)
-end
+local dsmLib = assert(loadScript(DSMLIB_PATH.."DsmSetupLib.lua"), "Not-Found: DSMLIB/DsmSetupLib.lua")(DEBUG_ON,SIMULATION_ON)
 
 local PHASE = dsmLib.PHASE
 local LINE_TYPE = dsmLib.LINE_TYPE
@@ -104,12 +98,29 @@ local function my_lcd_sizeText(s)
 end
 
 
-local function GUI_SwitchSimulationOFF()
+local function GUI_SwitchToRX()
+  -- Force to refresh DSM Info in MODEL (dsmLib pointing to the setup Script)
+  local dsmChannelInfo, description = dsmLib.CreateDSMPortChannelInfo()
+  
   dsmLib.ReleaseConnection()  
   dsmLib.LOG_close()
 
   SIMULATION_ON = false
-  dsmLib = loadScript(DSMLIB_PATH .. "DsmFwPrgLib.lua")(DEBUG_ON)
+  dsmLib = assert(loadScript(DSMLIB_PATH.."DsmFwPrgLib.lua"),"Not-Found: DSMLIB/DsmFwPrgLib.lua")(DEBUG_ON)
+  DSM_Context = dsmLib.DSM_Context
+
+  dsmLib.Init(toolName)  -- Initialize Library 
+  dsmLib.SetDSMChannelInfo(dsmChannelInfo, description)  -- send the dsmChannelInfo to new instance library
+  dsmLib.StartConnection()
+  DSM_Context.Refresh_Display = true
+end
+
+local function GUI_SwitchToSIM()
+  dsmLib.ReleaseConnection()  
+  dsmLib.LOG_close()
+
+  SIMULATION_ON = true
+  dsmLib = assert(loadScript(DSMLIB_PATH.."DsmFwPrgSIMLib.lua"), "Not-Found: DSMLIB/DsmFwPrgSIMLib.lua")(DEBUG_ON)
   DSM_Context = dsmLib.DSM_Context
 
   dsmLib.Init(toolName)  -- Initialize Library 
@@ -199,12 +210,12 @@ local function GUI_Display_Line_Menu(lineNum,line,selected)
     -- Non Selectable Menu Lines, plain text
     -- Can be use for sub headers or just regular text lines (like warnings)
 
-    local bold = (dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR.BOLD) and BOLD) or 0  
+    local bold = (dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR._BOLD) and BOLD) or 0  
 
-    if dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR.RIGHT) then -- Right Align???
+    if dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR._RIGHT) then -- Right Align???
         local tw = my_lcd_sizeText(line.Text)+4
         x =  LCD_X_LINE_VALUE - tw     -- Right 
-    elseif dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR.CENTER) then -- Center??
+    elseif dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR._CENTER) then -- Center??
         local tw = my_lcd_sizeText(line.Text) 
         x =  x + (LCD_X_LINE_VALUE - LCD_X_LINE_MENU)/2 - tw/2  -- Center - 1/2 Text
     end
@@ -229,12 +240,12 @@ local function GUI_Display_Line_Value(lineNum, line, value, selected, editing)
       header = dsmLib.GetFlightModeValue(line)
 
       -- Bold Text???
-      bold = (dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR.BOLD) and BOLD) or 0
+      bold = (dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR._BOLD) and BOLD) or 0
 
-      if dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR.RIGHT) then -- Right Align
+      if dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR._RIGHT) then -- Right Align
           local tw = my_lcd_sizeText(header)+4
           x =  LCD_X_LINE_VALUE - tw     -- Right 
-      elseif dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR.CENTER) then -- Centered
+      elseif dsmLib.isDisplayAttr(line.TextAttr,DISP_ATTR._CENTER) then -- Centered
           local tw = my_lcd_sizeText(header)
           x =  x + (LCD_X_LINE_VALUE - LCD_X_LINE_TITLE)/2 - tw/2  -- Center - 1/2 Text
       end
@@ -404,7 +415,7 @@ local function GUI_Display()
                   value = dsmLib.Get_List_Text(line.Val + line.TextStart) -- TextStart is the initial offset for text
                   local imgData = dsmLib.Get_List_Text_Img(line.Val + line.TextStart)   -- Complentary IMAGE for this value to Display??
                     
-                  if (imgData) then  -- Optional Image and Msg for value
+                  if (imgData and i == ctx.SelLine) then  -- Optional Image and Msg for selected value
                     GUI_ShowBitmap(LCD_X_LINE_TITLE,LCD_Y_LINE_START, imgData)
                   end
                 end
@@ -564,9 +575,12 @@ local function GUI_HandleEvent(event, touchState)
     elseif menuLines[ctx.SelLine].ValId ~= 0 then  -- Menu or Value
 
       if menuLines[ctx.SelLine].Type == LINE_TYPE.MENU then -- Navigate to Menu
-        if (SIMULATION_ON and menuLines[ctx.SelLine].ValId==0xFFFF) then
-          -- SPECIAL Simulation menu to Exit Simulation
-          GUI_SwitchSimulationOFF()
+        if (menuLines[ctx.SelLine].ValId==0xFFF1) then
+          -- SPECIAL Simulation menu to Simulator 
+          GUI_SwitchToSIM()
+        elseif (menuLines[ctx.SelLine].ValId==0xFFF2) then
+            -- SPECIAL Simulation menu to go to RX 
+            GUI_SwitchToRX()
         else
           dsmLib.GotoMenu(menuLines[ctx.SelLine].ValId, ctx.SelLine)  -- ValId is the MenuId to navigate to
         end
@@ -576,6 +590,7 @@ local function GUI_HandleEvent(event, touchState)
         else    -- Edit the current value  
           ctx.EditLine = ctx.SelLine
           originalValue = menuLines[ctx.SelLine].Val
+          dsmLib.ChangePhase(PHASE.VALUE_CHANGING_WAIT)
         end
       end
     end
@@ -618,16 +633,15 @@ local function GUI_Warning(event,touchState)
   lcd.drawFilledRectangle(0, 0, LCD_W, 17, LCD_TOOL_HDR_BGCOLOR)
   lcd.drawText(5, 0, header,  LCD_TOOL_HDR_COLOR + SMLSIZE)
 
+  lcd.drawText(100,20,"INFO", BOLD)
+  lcd.drawText(5,40,"DSM Forward programing shares TX Servo/Output settings", 0)
+  lcd.drawText(5,60,"with the RX. Make sure you setup your plane first in ", 0)
+  lcd.drawText(5,80,"the TX before your start Fwrd programming your RX.", 0)
+  lcd.drawText(5,100,"Wing & Tail type can be configured using this tool.", 0)
 
-  lcd.drawText(100,20,"WARNING", BLINK+BOLD)
-  lcd.drawText(5,40,"Gyro settings-> Initial Setup and Initial SAFE Setup", BOLD)
-  lcd.drawText(5,70,"Has only been tested with normal wing type and normal tail.", 0)
-  lcd.drawText(5,90,"Make sure that your Gyro/Safe reacts correctly after setup", 0)
-  lcd.drawText(5,110,"with this tool.  If not, set it up with a Spektrum TX.", 0)
-
-  lcd.drawText(5,150,"Gyro settings-> System Setup -> Relearn Servo Setting", BOLD)
-  lcd.drawText(5,180,"Will override Wing type, tail type, servo reverse, etc.", 0)
-  lcd.drawText(5,200,"If this RX was initally setup with a Spektrum Transmiter.", 0)
+  lcd.drawText(5,150,"TX Gyro Servo settings are sent to the RX during 'Initial Setup'", 0)
+  lcd.drawText(5,170,"as well as when using RX 'Relearn Servo Settings'", 0)
+  lcd.drawText(5,200,"ALWAYS TEST Gyro reactions after this conditions before flying.", BOLD)
 
   lcd.drawText(100,250,"    OK     ", INVERS + BOLD)
 

@@ -110,7 +110,7 @@ CFlie|38|CFlie||||||||NRF24L01|
 [J6Pro](Protocols_Details.md#J6Pro---22)|22|||||||||CYRF6936|
 [JJRC345](Protocols_Details.md#JJRC345---71)|71|JJRC345|SkyTmblr|||||||NRF24L01|XN297
 [JOYSWAY](Protocols_Details.md#JOYSWAY---84)|84|||||||||NRF24L01|XN297
-[KF606](Protocols_Details.md#KF606---49)|49|KF606|MIG320|||||||NRF24L01|XN297
+[KF606](Protocols_Details.md#KF606---49)|49|KF606|MIG320|ZCZ50||||||NRF24L01|XN297
 [KN](Protocols_Details.md#KN---9)|9|WLTOYS|FEILUN|||||||NRF24L01|
 [Kyosho](Protocols_Details.md#Kyosho---73)|73|FHSS|Hype|||||||A7105|
 [Kyosho2](Protocols_Details.md#Kyosho2---93)|93|KT-17||||||||NRF24L01|
@@ -1049,6 +1049,15 @@ CH1|CH2|CH3|CH4|CH5|CH6
 ---|---|---|---|---|---
 A||T||TRIM|LED
 
+### Sub_protocol ZCZ50v2 - *2*
+Model: ZC-Z50 Cessna
+
+This might be newer version of the model. My plane does not have front propeller, but its just fake anyway (no motor in the front).
+
+CH1|CH2|CH3|CH4|CH5|CH6
+---|---|---|---|---|---
+A||T||TRIM|UNKNOWN
+
 ## MJXQ - *18*
 Autobind protocol
 
@@ -1783,7 +1792,7 @@ Option field | Value
 3|The module will control the brick number RX_num, RX_num+1 and RX_num+2
 4|The module will control the brick number RX_num, RX_num+1, RX_num+2 and RX_num+3
 
-To associate a brick to a RX number (RX_num above), set this RX number under the protocol, set option to 1, launch a bind and power on the brick you want to control. Repeat this for every brick using a different RX number each time and then indicate the number of bricks to be comtrolled using the Option field.
+To associate a brick to a RX number (RX_num above), set this RX number under the protocol, set option to 1, launch a bind and power on the brick you want to control. Repeat this for every brick using a different RX number each time and then indicate the number of bricks to be controlled using the Option field.
 
 Example: I want to control 2 bricks. I select RX number 1, set option to 1 and launch a bind on the first brick. I select RX number 2, set option to 1 and launch a bind on the second brick. Now to control both bricks I set RX number to 1 and option to 2. Therefore brick1 will react to channels CH1 to CH4 and brick2 to channel CH5 to CH8.
 On another model I can control 4 other bricks, bind each brick to RX number 3 to 6 and then finaly set RX number to 3 and option to 4 to contol the 4 bricks with CH1 to CH16.

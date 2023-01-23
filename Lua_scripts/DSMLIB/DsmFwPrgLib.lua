@@ -40,7 +40,7 @@
 
 
 local DEBUG_ON = ... -- Get Debug_ON from parameters.  -- 0=NO DEBUG, 1=HIGH LEVEL 2=MORE DETAILS 
-local LIB_VERSION = "0.5"
+local LIB_VERSION = "0.53"
 
 local Lib = { Init_Text = function (rxId) end }
 
@@ -82,8 +82,32 @@ local LINE_TYPE = {
     LT_EMPTY = 0x00
 }
 
+--Channel Types --
+local CH_TYPE = {
+    NONE     = 0x00,
+    AIL      = 0x01,
+    ELE      = 0x02,
+    RUD      = 0x04,
+
+    REVERSE  = 0x20,
+    THR      = 0x40,
+    SLAVE    = 0x80,
+}
+
+local CH_MIX_TYPE = {
+    NORMAL       = 0x00,
+    MIX_AIL_B    = 0x10,   -- Traileron B
+    MIX_ELE_A    = 0x20,   -- For VTIAL and Delta-ELEVON A
+    MIX_ELE_B_REV= 0x30,   -- For VTIAL and Delta-ELEVON B
+    MIX_ELE_B    = 0x40,   -- For VTIAL and Delta-ELEVON B
+    MIX_ELE_A_REV= 0x50,   -- For VTIAL and Delta-ELEVON A
+    MIX_AIL_B_REV= 0x60,   -- Traileron B Rev
+    NORM_REV     = 0x70
+}
+
+-- Bug in Lua compiler, confusing with global BOLD and RIGHT
 local DISP_ATTR = {
-    BOLD = 0x01,  RIGHT=0x02, CENTER=0x04, PERCENT = 0x10, DEGREES=0x20, FORCED_MENU = 0x40 
+    _BOLD = 0x01,  _RIGHT=0x02, _CENTER=0x04, PERCENT = 0x10, DEGREES=0x20, FORCED_MENU = 0x40 
 }
 
 local DSM_Context = {
@@ -98,6 +122,17 @@ local DSM_Context = {
     CurLine = -1,       -- Current Line Requested/Parsed via h message protocol 
     isReset = false     -- false when starting from scracts, true when starting from Reset
 }
+
+-- MODEL information from ETX/OTX
+local MODEL = {
+    modelName = "",            -- The name of the model comming from OTX/ETX
+    modelOutputChannel = {},   -- Output information from OTX/ETX
+    
+    TX_CH_TEXT = {},
+    PORT_TEXT = {},
+    DSM_ChannelInfo = {}       -- Data Created by DSM Configuration Script
+}
+
 
 local MAX_MENU_LINES = 6
 local BACK_BUTTON    = -1                   -- Tread it as a display line #-1
@@ -119,6 +154,7 @@ local PhaseText = {}
 local LineTypeText = {}
 local RxName = {}
 
+
 local Text = {}             -- Text for Menu and Menu Lines   (Headers only)
 local List_Text = {}        -- Messages for List Options (values only)
 local List_Text_Img = {}    -- If the Text has Attached Images
@@ -127,7 +163,42 @@ local List_Values = {}      -- Additiona restrictions on List Values when non co
 local LOG_FILE = "/LOGS/dsm_log.txt"
 local logFile  = nil
 
+
 function DSM_Context.isEditing() return DSM_Context.EditLine~=nil end
+
+
+---- DSM_ChannelInfo ---------------------------------
+-- First byte describe Special  Mixing (Vtail/Elevon = 0x20)
+--VTAIL
+--(0x00 0x06) CH_TYPE.ELE+CH_TYPE.RUD  (0x02+0x04 = 0x06)
+--(0x20 0x86) CH_TYPE.ELE+CH_TYPE.RUD+CH_TYPE.SLAVE  (0x02+0x04+0x80 = 0x86)
+
+-- The 2nd byte describes the functionality of the port 
+-- 
+-- Single   Example: CH_TYPE.AIL (0x01) Aileron
+-- Reverse  Example: CH_TYPE.AIL+CH_TYPE.REVERSE (0x01+0x20=0x21) Reverse Aileron
+-- Slave    Example: CH_TYPE.AIL+CH_TYPE.SLAVE (0x01+0x80) -- 2nd servo Aileron
+
+-- Elevon   Example: CH_TYPE.AIL+CH_TYPE.ELE  (0x01+0x02 = 0x03) -- Elevon
+-- Elevon   Example: CH_TYPE.AIL+CH_TYPE.ELE+CH_TYPE.SLAVE  (0x01+0x02+0x80 = 0x83) -- Slave Elevon
+
+-- RudElv (VTail) Example: CH_TYPE.ELE+CH_TYPE.RUD  (0x02+0x04 = 0x06) -- Rudevator
+-- RudElv (VTail) Example: CH_TYPE.ELE+CH_TYPE.RUD+CH_TYPE.SLAVE  (0x02+0x04+0x80 = 0x86) -- Rudevator Slave
+
+-- DEFAULT Simple Plane Port configuration (The Configuration tool will overrride this)
+MODEL.DSM_ChannelInfo= {[0]= -- Start array at position 0
+                        {[0]=  CH_MIX_TYPE.NONE, CH_TYPE.THR},    -- Ch1 Thr  (0x40)
+                        {[0]=  CH_MIX_TYPE.NONE, CH_TYPE.AIL},    -- Ch2 Ail  (0x01)
+                        {[0]=  CH_MIX_TYPE.NONE, CH_TYPE.ELE},    -- Ch2 ElE  (0x02)
+                        {[0]=  CH_MIX_TYPE.NONE, CH_TYPE.RUD},    -- Ch4 Rud  (0x04)
+                        {[0]=  CH_MIX_TYPE.NONE, CH_TYPE.NONE},   -- Ch5 Gear (0x00)
+                        {[0]=  CH_MIX_TYPE.NONE, CH_TYPE.NONE},   -- Ch6 Aux1 (0x00)
+                        {[0]=  CH_MIX_TYPE.NONE, CH_TYPE.NONE},   -- Ch7 Aux2 (0x00)
+                        {[0]=  CH_MIX_TYPE.NONE, CH_TYPE.NONE},   -- Ch8 Aux3 (0x00)
+                        {[0]=  CH_MIX_TYPE.NONE, CH_TYPE.NONE},   -- Ch9 Aux4 (0x00)
+                        {[0]=  CH_MIX_TYPE.NONE, CH_TYPE.NONE}    -- Ch10 Aux5 (0x00)
+                    }   
+
 
 ------------------------------------------------------------------------------------------------------------
 local logCount=0
@@ -140,6 +211,7 @@ local function LOG_write(...)
     local str = string.format(...)
     io.write(logFile, str)
 
+    str = string.gsub(str,"\n"," ") -- Elimitate return from line, since print will do it
     print(str)
 
     if (logCount > 10) then  -- Close an re-open the file
@@ -304,15 +376,40 @@ local function menuLine2String(l)
             end    
         end
 
-        txt = string.format("L[#%s T=%s VId=0x%X Text=\"%s\"[0x%X] %s %s MId=0x%X ]",
+        txt = string.format("L[#%s T=%s VId=0x%X Text=\"%s\"[0x%X] %s %s MId=0x%X A=0x%X]",
             l.lineNum, lineType2String(l.Type), l.ValId,
             l.Text, l.TextId,
             value,
             range,
-            l.MenuId
+            l.MenuId,
+            l.TextAttr
         )
     end
     return txt
+end
+
+local function channelType2String(byte1, byte2) 
+    local s = ""
+
+    if (byte2==0) then return s end;
+    if (bit32.band(byte2,CH_TYPE.AIL)>0) then s=s.."AIL " end
+    if (bit32.band(byte2,CH_TYPE.ELE)>0) then s=s.."ELE " end
+    if (bit32.band(byte2,CH_TYPE.RUD)>0) then s=s.."RUD " end
+    if (bit32.band(byte2,CH_TYPE.THR)>0) then s=s.."THR " end
+    if (bit32.band(byte2,CH_TYPE.SLAVE)>0) then s=s.."SLAVE " end
+    if (bit32.band(byte2,CH_TYPE.REVERSE)>0) then s=s.."REVERSE " end
+
+    if (byte1==CH_MIX_TYPE.NORMAL) then s=s.." MIX_NOR" 
+    elseif (byte1==CH_MIX_TYPE.MIX_AIL_B) then s=s.." MIX_AIL_B" 
+    elseif (byte1==CH_MIX_TYPE.MIX_ELE_A) then s=s.." MIX_ELE_A" 
+    elseif (byte1==CH_MIX_TYPE.MIX_ELE_B_REV) then s=s.." MIX_ELE_B_Rev" 
+    elseif (byte1==CH_MIX_TYPE.MIX_ELE_B) then s=s.." MIX_ELE_B" 
+    elseif (byte1==CH_MIX_TYPE.MIX_ELE_A_REV) then s=s.." MIX_ELE_A_Rev" 
+    elseif (byte1==CH_MIX_TYPE.MIX_AIL_B_REV) then s=s.." MIX_AIL_B_Rev" 
+    elseif (byte1==CH_MIX_TYPE.NORM_REV) then s=s.." MIX_NOR_Rev" 
+    end
+
+    return s;
 end
 
 ------------------------------------------------------------------------------------------------------------
@@ -365,29 +462,33 @@ local function isDisplayAttr(attr, bit)
 end
 
 local function ExtractDisplayAttr(text1, attr)
-    local text, pos = string.gsub(text1, "/c", "")
-    if (pos>0) then -- CENTER
-        attr = bit32.bor(attr, DISP_ATTR.CENTER)
-    end
+    local text = text1, pos;
 
-    text, pos = string.gsub(text, "/r", "")
-    if (pos>0) then -- RIGHT
-        attr = bit32.bor(attr, DISP_ATTR.RIGHT)
-    end
+    for i=1,2 do
+        text, pos = string.gsub(text, "/c$", "")
+        if (pos>0) then -- CENTER
+            attr = bit32.bor(attr, DISP_ATTR._CENTER)
+        end
 
-    text, pos = string.gsub(text, "/p", "")
-    if (pos>0) then -- Percent TEXT
-        attr = bit32.bor(attr, DISP_ATTR.PERCENT)
-    end
+        text, pos = string.gsub(text, "/r$", "")
+        if (pos>0) then -- RIGHT
+            attr = bit32.bor(attr, DISP_ATTR._RIGHT)
+        end
 
-    text, pos = string.gsub(text, "/b", "")
-    if (pos>0) then -- BOLD TEXT
-        attr = bit32.bor(attr, DISP_ATTR.BOLD)
-    end
+        text, pos = string.gsub(text, "/p$", "")
+        if (pos>0) then -- Percent TEXT
+            attr = bit32.bor(attr, DISP_ATTR.PERCENT)
+        end
 
-    text, pos = string.gsub(text, "/M", "")
-    if (pos>0) then -- FORCED MENU Button 
-        attr = bit32.bor(attr, DISP_ATTR.FORCED_MENU)
+        text, pos = string.gsub(text, "/b$", "")
+        if (pos>0) then -- BOLD TEXT
+            attr = bit32.bor(attr, DISP_ATTR._BOLD)
+        end
+
+        text, pos = string.gsub(text, "/m$", "")
+        if (pos>0) then -- FORCED MENU Button 
+            attr = bit32.bor(attr, DISP_ATTR.FORCED_MENU)
+        end
     end
 
     return text, attr 
@@ -450,8 +551,115 @@ local function DSM_send(...)
     end
 end
 
-------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------
+-- Read the model information from OTX/ETX
 
+local function getModuleChannelOrder(num) 
+      --Determine fist 4 channels order
+  local channel_names={}
+  local stick_names = {[0]= "R", "E", "T", "A" }
+  local ch_order=num
+  if (ch_order == -1) then
+    channel_names[0] = stick_names[3]
+    channel_names[1] = stick_names[1]
+    channel_names[2] = stick_names[2]
+    channel_names[3] = stick_names[0]
+  else
+    channel_names[bit32.band(ch_order,3)] = stick_names[3]
+    ch_order = math.floor(ch_order/4)
+    channel_names[bit32.band(ch_order,3)] = stick_names[1]
+    ch_order = math.floor(ch_order/4)
+    channel_names[bit32.band(ch_order,3)] = stick_names[2]
+    ch_order = math.floor(ch_order/4)
+    channel_names[bit32.band(ch_order,3)] = stick_names[0]
+  end
+
+  local s = ""
+  for i=0,3 do
+    s=s..channel_names[i]
+  end
+  return s
+end
+
+local function DSM_ReadTxModelData()
+    local TRANSLATE_AETR_TO_TAER=false
+    local table = model.getInfo()   -- Get the model name 
+    MODEL.modelName = table.name
+
+    local module = model.getModule(0) -- Internal
+    if (module==nil) then module = model.getModule(1) end -- External
+    if (module~=nil) then
+        if (module.Type==6 ) then -- MULTI-MODULE
+            local chOrder = module.channelsOrder
+            local s = getModuleChannelOrder(chOrder)
+            LOG_write("MultiChannel Ch Order: [%s]  %s\n",chOrder,s) 
+
+            if (s=="AETR") then TRANSLATE_AETR_TO_TAER=true 
+            else TRANSLATE_AETR_TO_TAER=false 
+            end
+        end
+    end
+
+    LOG_write("MODEL NAME = %s\n",MODEL.modelName) 
+
+    -- Read Ch1 to Ch10
+    local i= 0
+    for i = 0, 12 do 
+        local ch = model.getOutput(i) -- Zero base 
+        if (ch~=nil) then
+            MODEL.modelOutputChannel[i] = ch
+            if (string.len(ch.name)==0) then 
+                ch.formatCh = string.format("TX:Ch%i",i+1)
+            else
+                ch.formatCh = string.format("TX:Ch%i/%s",i+1,ch.name or "--")
+            end
+        end
+    end
+
+    -- Translate AETR to TAER
+    -- TODO: Check if there is a way to know how to the TX is configured, since if it is 
+    -- already TAER, is not needed 
+
+    if (TRANSLATE_AETR_TO_TAER) then 
+        LOG_write("Applying  AETR -> TAER translation\n") 
+        local ail = MODEL.modelOutputChannel[0]
+        local elv = MODEL.modelOutputChannel[1]
+        local thr = MODEL.modelOutputChannel[2]
+
+        MODEL.modelOutputChannel[0] = thr
+        MODEL.modelOutputChannel[1] = ail
+        MODEL.modelOutputChannel[2] = elv
+    end
+
+    -- Create the Port Text to be used 
+    LOG_write("Ports/Channels:\n") 
+    for i = 0, 9 do 
+        local ch =  MODEL.modelOutputChannel[i]
+        if (ch~=nil) then
+            MODEL.TX_CH_TEXT[i] = ch.formatCh
+            if LCD_W <= 128 then -- SMALLER SCREENS
+                MODEL.PORT_TEXT[i] = string.format("P%i (%s) ",i+1,MODEL.TX_CH_TEXT[i])
+            else
+                MODEL.PORT_TEXT[i] = string.format("Port%i (%s) ",i+1,MODEL.TX_CH_TEXT[i])
+            end
+            
+            LOG_write("Port%d %s [%d,%d] Rev=%d, Off=%d, ppmC=%d, syn=%d\n",i+1,MODEL.TX_CH_TEXT[i],math.floor(ch.min/10),math.floor(ch.max/10), ch.revert, ch.offset, ch.ppmCenter, ch.symetrical)
+        end
+    end
+end
+
+local function DSM_SetDSMChannelInfo(channelInfo, description)
+    MODEL.DSM_ChannelInfo = channelInfo
+
+    LOG_write("Current Model Generated Port Configuration\n")
+    LOG_write("Description:%s\n",description)
+    for i = 0, 9 do 
+        local b1, b2 = channelInfo[i][0], channelInfo[i][1]
+        LOG_write("%s (0x%02X, 0x%02X) = %s \n",MODEL.PORT_TEXT[i],b1,b2, channelType2String(b1,b2))
+    end
+end
+
+-------------------------------------------------------------------------------------------------
 local function DSM_StartConnection()
     if (DEBUG_ON) then LOG_write("DSM_StartConnection()\n") end
     
@@ -656,83 +864,117 @@ end
 
 local function DSM_validateMenuValue(valId, text, line)
     if (DEBUG_ON) then LOG_write("SEND DSM_validateMenuValue(ValueId=0x%X) Extra: Text=\"%s\" Value=%s\n", valId, text, lineValue2String(line)) end
-    DSM_send(0x19, 0x06, int16_MSB(valId), int16_LSB(valId)) 
-    -- Pascal: i think the 2nd byte is the leghts of the entire message in bytes, so instead of 0x06, should be 0x04 for here.. work both ways
+    DSM_send(0x19, 0x04, int16_MSB(valId), int16_LSB(valId)) 
 end
 
-local function DSM_menuValueChangingWait(valId, text, line)
-    if (DEBUG_ON) then LOG_write("SEND DSM_menuValueChangingWait(ValueId=0x%X) Extra: Text=\"%s\"  Value=%s\n", valId, text, lineValue2String(line)) end
-    DSM_send(0x1A, 0x06, int16_MSB(valId), int16_LSB(valId))
-     -- Pascal: i think the 2nd byte is the leghts of the entire message in bytes, so instead of 0x06, should be 0x04 for here.. work both ways
+local function DSM_menuValueChangingWait(lineNum, text, line)
+    if (DEBUG_ON) then LOG_write("SEND DSM_menuValueChangingWait(lineNo=0x%X) Extra: Text=\"%s\"  Val=%s\n", lineNum, text, lineValue2String(line)) end
+    DSM_send(0x1A, 0x04, int16_MSB(lineNum), int16_LSB(lineNum))
 end
 
-local function DSM_sentTxInfo(menuId,curLine)
-        if (TxInfo_Step == 0 and TxInfo_Type==0x00) then  
-            -- AR636B.. but does not work
-            if (DEBUG_ON) then LOG_write("CALL DSM_SendTxInfo_22(#%d DATA=TX: 0x22 0x04 %02X %02X)\n", curLine,
-                0x00, 0x00) -- DATA part
-           end
-           DSM_send(0x22, 0x04, 0x00, 0x00)
+local function DSM_menuValueChangingWaitEnd(lineNum, text, line)
+    if (DEBUG_ON) then LOG_write("SEND DSM_menuValueChangingEnd(lineNo=0x%X) Extra: Text=\"%s\"  Value=%s\n", lineNum, text, lineValue2String(line)) end
+    DSM_send(0x1B, 0x04, int16_MSB(lineNum), int16_LSB(lineNum))
+end
 
-        elseif (TxInfo_Step == 0 and (TxInfo_Type==0x01 or TxInfo_Type==0x1F)) then  
+-- Send the functionality of the RX channel Port (channel)
+local function DSM_sendTxChInfo_20(portNo)
+    local b1,b2 =  MODEL.DSM_ChannelInfo[portNo][0], MODEL.DSM_ChannelInfo[portNo][1]
+
+    if (DEBUG_ON) then LOG_write("CALL DSM_TxChInfo_20(#%d %s DATA= %02X %02X %02X %02X)  CONTEXT: %s\n", portNo, MODEL.PORT_TEXT[portNo],
+        portNo, portNo, b1, b2, channelType2String(b1,b2)) -- DATA part
+    end
+    DSM_send(0x20, 0x06, portNo, portNo, b1, b2) 
+end
+
+local function DSM_sendTxSubtrim_21(portNo)
+    --SubTrim is encoded as an offset of the pulse width. 
+
+    local data = {[0]= -- Start at 0
+        {[0]= 0x0, 0x00, 0x07, 0xFF }, -- Ch1 Thr:     0 00 07 FF   Subtrim ??
+        {[0]= 0x0, 0x8E, 0x07, 0x72 }, -- Ch2 Ail:     0 8E 07 72   Subtrim 0
+        {[0]= 0x0, 0x8E, 0x07, 0x72 }, -- Ch3 Elev:    0 8E 07 72   Subtrim 0
+        {[0]= 0x0, 0x8E, 0x07, 0x72 }, -- Ch4 Rud:     0 8E 07 72   Subtrim 0
+        {[0]= 0x0, 0x8E, 0x07, 0x72 }, -- Ch5 Gear:    0 8E 07 72   Subtrim 0
+        {[0]= 0x0, 0x8E, 0x07, 0x72 }, -- Ch6 Aux1:    0 8E 07 72   Subtrim 0
+        {[0]= 0x0, 0x8E, 0x07, 0x72 }, -- Ch7 Aux2:    0 8E 07 72   Subtrim 0
+        {[0]= 0x0, 0x8E, 0x07, 0x72 }, -- Ch8 Aux3:    0 8E 07 72   Subtrim 0
+        {[0]= 0x0, 0x8E, 0x07, 0x72 }, -- Ch9 Aux4:    0 8E 07 72   Subtrim 0
+        {[0]= 0x0, 0x8E, 0x07, 0x72 }, -- Ch10 Aux5:   0 8E 07 72   Subtrim 0
+    }
+
+    local b1,b2,b3,b4 = data[portNo][0], data[portNo][1], data[portNo][2], data[portNo][3]
+
+    if (DEBUG_ON) then LOG_write("CALL DSM_TxSubtrim_21(#%d %s DATA=%02X %02X %02X %02X)\n", portNo, MODEL.PORT_TEXT[portNo],
+        b1,b2,b3,b4) -- DATA part
+   end
+   DSM_send(0x21, 0x06, b1,b2,b3,b4) -- Port is not send anywhere, since the previous 0x20 type message have it.
+end
+
+local function DSM_sendTxServoTravel_23(portNo)
+    local leftTravel =   math.abs(math.floor(MODEL.modelOutputChannel[portNo].min/10))
+    local rightTravel =  math.abs(math.floor(MODEL.modelOutputChannel[portNo].max/10))
+    local debugInfo   = string.format("Travel L/R (%d - %d)",leftTravel,rightTravel)
+
+    if (DEBUG_ON) then LOG_write("CALL DSM_TxServoTravel_23(#%d %s DATA= %02X %02X %02X %02X)   CONTEXT: %s\n", portNo, MODEL.PORT_TEXT[portNo],
+        0x00, leftTravel, 0x00, rightTravel, debugInfo) -- DATA part
+    end
+    DSM_send(0x23, 0x06, 0x00, leftTravel, 0x00, rightTravel)
+end
+
+local function DSM_sentTxInfo(menuId,portNo)
+        -- TxInfo_Type=0    : AR636B Main Menu (Send port/Channel info + SubTrim + Travel)
+        -- TxInfo_Type=1    : AR630-637 Famly Main Menu  (Only Send Port/Channel usage Msg 0x20)
+        -- TxInfo_Type=1F   : AR630-637 Initial Setup/Relearn Servo Settings (Send port/Channel info + SubTrim + Travel +0x24/Unknown)
+
+        if (TxInfo_Step == 0) then  
             -- AR630 family: Both TxInfo_Type (ManinMenu=0x1,   Other First Time Configuration = 0x1F)
-
-            local last_byte = { 0x40, 0x01, 0x02, 0x04, 0x00, 0x00 } -- unknown.
-
-            if (DEBUG_ON) then LOG_write("CALL DSM_SendTxInfo_20(#%d DATA=TX: 0x20 0x06 %02X %02X %02X %02X)\n", curLine,
-                 curLine, curLine, 0, last_byte[curLine + 1]) -- DATA part
-            end
-            DSM_send(0x20, 0x06, curLine, curLine, 0x00, last_byte[curLine + 1]) -- line X
-            TxInfo_Step = TxInfo_Step + 1
+            DSM_sendTxChInfo_20(portNo)
 
             if (TxInfo_Type == 0x1F) then
                 Waiting_RX = 0 -- keep Transmitig
+                TxInfo_Step = 1
             end 
-        elseif (TxInfo_Step == 1 and TxInfo_Type==0x1F) then
-            -- 23,6: 0 64 0 64
-            if (DEBUG_ON) then LOG_write("CALL DSM_SendTxInfo_23(#%d DATA=TX: 0x23 0x06 %02X %02X %02X %02X)\n", curLine,
-                0x00, 0x64, 0x00, 0x64) -- DATA part
-           end
-           DSM_send(0x23, 0x06, 0x00, 0x64, 0x00, 0x64)
-           TxInfo_Step = TxInfo_Step + 1
+            if (TxInfo_Type == 0x00) then
+                Waiting_RX = 0 -- keep Transmitig
+                TxInfo_Step = 2
+            end 
+        elseif (TxInfo_Step == 1) then
+            DSM_sendTxServoTravel_23(portNo)
+           TxInfo_Step = 2
            Waiting_RX = 0 -- keep Transmitig
-        elseif (TxInfo_Step == 2 and TxInfo_Type==0x1F) then
-            local data = { 
-                { 0x0, 0x00, 0x07, 0xFF }, -- #0: 0 00 07 FF
-                { 0x0, 0x8E, 0x07, 0x72 }, -- #1: 0 8E 07 72 
-                { 0x0, 0x8E, 0x07, 0x72 }, -- #2: 0 8E 07 72 
-                { 0x0, 0x8E, 0x07, 0x72 } -- #3: 0 8E 07 72 
-            }
+        elseif (TxInfo_Step == 2) then
+            DSM_sendTxSubtrim_21(portNo)
 
-            if (DEBUG_ON) then LOG_write("CALL DSM_SendTxInfo_21(#%d DATA=TX: 0x21 0x06 %02X %02X %02X %02X)\n", curLine,
-                data[curLine+1][1], data[curLine+1][2], data[curLine+1][3], data[curLine+1][4]) -- DATA part
+            Waiting_RX = 0 -- keep Transmitig
+            if (TxInfo_Type == 0x00) then
+                TxInfo_Step = 5 -- End Step 
+            else 
+                TxInfo_Step = 3
            end
-           DSM_send(0x21, 0x06, data[curLine+1][1], data[curLine+1][2], data[curLine+1][3], data[curLine+1][4])
-           TxInfo_Step = TxInfo_Step + 1
-           Waiting_RX = 0 -- keep Transmitig
-        elseif (TxInfo_Step == 3 and TxInfo_Type==0x1F) then
+        elseif (TxInfo_Step == 3) then
             -- 24,6: 0 83 5A B5 
-            if (DEBUG_ON) then LOG_write("CALL DSM_SendTxInfo_24(#%d DATA=TX: 0x24 0x06 %02X %02X %02X %02X)\n", curLine,
+            if (DEBUG_ON) then LOG_write("CALL DSM_TxInfo_24(#%d DATA=0x24 0x06 %02X %02X %02X %02X)\n", portNo,
                 0x00, 0x83, 0x5A, 0xB5) -- DATA part
            end
-           DSM_send(0x24, 0x06, 0x00, 0x83, 0x5A, 0xB5)
-           TxInfo_Step = TxInfo_Step + 1
+           DSM_send(0x24, 0x06, 0x00, 0x83, 0x5A, 0xB5) -- Still Uknown
+           TxInfo_Step = 4
            Waiting_RX = 0 -- keep Transmitig
-        elseif (TxInfo_Step == 4 and TxInfo_Type==0x1F) then
+        elseif (TxInfo_Step == 4) then
             -- 24,6: 6 80 25 4B 
-            if (DEBUG_ON) then LOG_write("CALL DSM_SendTxInfo_24(#%d DATA=TX: 0x24 0x06 %02X %02X %02X %02X)\n", curLine,
+            if (DEBUG_ON) then LOG_write("CALL DSM_TxInfo_24(#%d DATA=0x24 0x06 %02X %02X %02X %02X)\n", portNo,
                 0x06, 0x80, 0x25, 0x4B) -- DATA part
            end
-           DSM_send(0x24, 0x06, 0x06, 0x80, 0x25, 0x4B)
-           TxInfo_Step = TxInfo_Step + 1
+           DSM_send(0x24, 0x06, 0x06, 0x80, 0x25, 0x4B)  -- Still Uknown
+           TxInfo_Step = 5
            Waiting_RX = 0 -- keep Transmitig
-        elseif (TxInfo_Step == 5 and TxInfo_Type==0x1F) then
+        elseif (TxInfo_Step == 5) then
             -- 22,4: 0 0 
-            if (DEBUG_ON) then LOG_write("CALL DSM_SendTxInfo_22(#%d DATA=TX: 0x22 0x04 %02X %02X)\n", curLine,
+            if (DEBUG_ON) then LOG_write("CALL DSM_TxInfo_End_22(#%d DATA=%02X %02X)\n", portNo,
                 0x00, 0x00) -- DATA part
            end
            DSM_send(0x22, 0x04, 0x00, 0x00)
-           TxInfo_Step = TxInfo_Step + 1
+           TxInfo_Step = 6
         end
 end
 
@@ -780,25 +1022,29 @@ local function DSM_sendRequest()
         DSM_getNextMenuValue(ctx.Menu.MenuId, line.ValId, line.Text)
 
     elseif ctx.Phase == PHASE.VALUE_CHANGING then -- send value
-        local line = ctx.MenuLines[ctx.SelLine] -- Updated Value of SELECTED line
+        local line = ctx.MenuLines[ctx.SelLine] -- Updated Value of SELECTED line       
         DSM_updateMenuValue(line.ValId, line.Val, line.Text, line)
         ctx.Phase = PHASE.VALUE_CHANGING_WAIT
 
     elseif ctx.Phase == PHASE.VALUE_CHANGING_WAIT then
         local line = ctx.MenuLines[ctx.SelLine]
-        DSM_menuValueChangingWait(line.ValId, line.Text, line)
+        DSM_menuValueChangingWait(line.lineNum, line.Text, line)
 
     elseif ctx.Phase == PHASE.VALUE_CHANGE_END then -- send value
         -- This is a 2 step operation.. Send the value first, then send the Verification.. Value_Changed_Step used for that
         -- on the validation, the RX will set a valid value if the value is invalid. A Menu_Value Message will come from the RX 
 
-        local line = ctx.MenuLines[ctx.SelLine] -- Updat Value of SELECTED line
+        local line = ctx.MenuLines[ctx.SelLine] -- Update Value of SELECTED line
         if Value_Change_Step == 0 then  
             DSM_updateMenuValue(line.ValId, line.Val, line.Text, line)
             Value_Change_Step = 1
             Waiting_RX = 0 -- Keep on Transmitin State, since we want to send a ValidateMenuValue inmediatly after
-        else  -- Validate the value
+        elseif Value_Change_Step == 1 then -- Validate the value
             DSM_validateMenuValue(line.ValId, line.Text, line)
+            Value_Change_Step = 2
+            Waiting_RX = 0 -- Keep on Transmitin State, since we want to send a ValidateMenuValue inmediatly after
+        else  -- No more waiting for changes
+            DSM_menuValueChangingWaitEnd(line.lineNum, line.Text, line)
             Value_Change_Step = 0
         end
 
@@ -917,13 +1163,13 @@ local function DSM_parseReqTxInfo()
     -- 0x09 0x05 0x01   0x01 0x00   0x00 0x00 0x00 0x07   Menu: MAIN MENU
     -- 0x09 0x05 0x01   0x1F 0x00   0x00 0x00 0x00 0x07   Menu: First Time Setup
     --           Line   ??                   ????
-    local curLine = multiBuffer(12)
+    local portNo = multiBuffer(12)
     TxInfo_Type   = multiBuffer(13)
-    if (DEBUG_ON) then LOG_write("RESPONSE ReqTXInfo(LineNum=%d DataType=0x%0X  DATA=%s)\n", curLine, TxInfo_Type, multiBuffer2String()) end
+    if (DEBUG_ON) then LOG_write("RESPONSE ReqTXChannelInfo(#%d DataType=0x%0X  DATA=%s)\n", portNo, TxInfo_Type, multiBuffer2String()) end
 
     TxInfo_Step = 0
 
-    return curLine
+    return portNo
 end
 
 
@@ -1001,9 +1247,9 @@ local function DSM_processResponse()
         ctx.Phase = PHASE.MENU_VALUES
         
     elseif cmd == 0x05 then -- Request TX Info
-        local lineNum = DSM_parseReqTxInfo() 
+        local portNo = DSM_parseReqTxInfo() 
 
-        if (lineNum==ctx.CurLine) then
+        if (portNo==ctx.CurLine) then
             -- WEIRD BEHAVIOR
             -- We got the same line we already got. thi will continue
             -- on a loop and disconnect RX 
@@ -1011,7 +1257,7 @@ local function DSM_processResponse()
             if (DEBUG_ON) then LOG_write("ERROR: Received Same menu line\n") end
         end -- Got the next line.. keep requesting more
             
-        ctx.CurLine = lineNum
+        ctx.CurLine = portNo
         ctx.Phase = PHASE.MENU_REQ_TX_INFO
 
     elseif cmd == 0xA7 then -- answer to EXIT command
@@ -1139,26 +1385,32 @@ local function DSM_Init(toolName)
     RxName[RX.AR10360T] = "AR10360T"
     RxName[RX.AR631]    = "AR631"
 
+    DSM_ReadTxModelData()
 end
 
 local function DSM_Init_Text(rxId)
     --Text to be displayed
     -- For menu lines who are not navigation to other menus (SubHeders or Plain text)
-    -- you can use some formatting options:
+    -- you can use some formatting options AT THE END OF THE STRING :
 
     -- Text allightment:  /c = CENTER, /r = RIGHT
     -- Text effects:  /b = BOLD
     -- Text formatting: /p = PERCENT numbers (forced if not in Line Type=PERCENT)
-    -- Navigaton: /M = Force to be a Menu button, when a menu navigates to itself, 
+    -- Navigaton: /m = Force to be a Menu button, when a menu navigates to itself, 
     --      is usually a message line.. but sometimes, we want to navigate to the same page to refresh values
 
     -- array List_Values:
-    -- For some Menu LIST VALUES, special Lines of type:LIST_MENU1, the valod options seems not
+    -- For some Menu LIST VALUES, special Lines of type:LIST_MENU1, the valur options seems not
     -- to be contiguos,  the array "Menu_List_Values" can help narrow down the 
     -- valid menu options. I think this should come from the RX, but cant find where.
     -- Most of the times, Limes of type LIST_MENU1 comes with a 0->244 value range that is not correct
     -- usually is Ihnibit + range of contiguos values, but cant seems to find in the RX data receive the values 
     -- to do it automatically
+
+    local function getTxChText(ch)
+        return " ("..(MODEL.TX_CH_TEXT[ch] or "--")..")"
+    end
+
 
     List_Text[0x0001] = "Off"
     List_Text[0x0002] = "On"
@@ -1169,8 +1421,7 @@ local function DSM_Init_Text(rxId)
 
     -- Channel selection for SAFE MODE and GAINS on  FC6250HX
     List_Text[0x000C] = "Inhibit?" --?
-    List_Text[0x000D] = "Ch5 (Gear)"
-    for i = 1, 7 do List_Text[0x000D + i] = "Ch"..(i+5) .. " (Aux" .. i .. ")" end -- Aux channels
+    for i = 0, 7 do List_Text[0x000D + i] = "Ch"..(i+5) ..getTxChText(i+4) end -- Aux channels (Ch5 and Greater)
 
     -- Servo Output values.. 
     local servoOutputValues =  {0x0003,0x002D,0x002E,0x002F}  --Inh (GAP), 5.5ms, 11ms, 22ms. Fixing L_m1 with 0..244 range!
@@ -1190,15 +1441,10 @@ local function DSM_Init_Text(rxId)
     local channelValues = {0x0035,0x003A,0x003B,0x003C,0x003D,0x003E,0x003F,0x0040,0x0041,0x0042,0x0043,0x0044,0x0045,0x0046,0x0047,0x0048,0x0049} 
     
     List_Text[0x0035] = "Inhibit?" 
-    List_Text[0x0036] = "Throttle"
-    List_Text[0x0037] = "Aileron"
-    List_Text[0x0038] = "Elevator"
-    List_Text[0x0039] = "Rudder"
-    List_Text[0x003A] = "Ch5 (Gear)"
-    for i = 1, 7 do List_Text[0x003A + i] = "Ch"..(i+5) .. " (Aux" .. i .. ")" end -- Aux channels on AR637T
+    for i = 0, 11 do List_Text[0x0036 + i] = "Ch"..(i+1) .. getTxChText(i) end -- Channels on  AR637T
 
     for i = 1, 8 do -- 41..49
-        List_Text[0x0041 + i] = "Ch"..(i+13) .." (XPlus-" .. i .. ")"
+        List_Text[0x0041 + i] = "Ch"..(i+13)
     end
 
     -- ****No longer overrides of previous XPlus values, since using different array
@@ -1207,7 +1453,7 @@ local function DSM_Init_Text(rxId)
     Text[0x0040] = "Roll" 
     Text[0x0041] = "Pitch"
     Text[0x0042] = "Yaw"
-    Text[0x0043] = "Gain /c/b" -- FC6250HX, AR631
+    Text[0x0043] = "Gain/c/b" -- FC6250HX, AR631
     Text[0x0045] = "Differential"
     Text[0x0046] = "Priority"
     Text[0x0049] = "Output Setup" -- FC6250HX, AR631
@@ -1225,6 +1471,16 @@ local function DSM_Init_Text(rxId)
     Text[0x0054] = "Output Channel 4"
     Text[0x0055] = "Output Channel 5"
     Text[0x0056] = "Output Channel 6"
+
+    if LCD_W <= 128 then -- Override for smaller screens 
+        Text[0x0051] = "Output Ch 1"
+        Text[0x0052] = "Output Ch 2"
+        Text[0x0053] = "Output Ch 3"
+        Text[0x0054] = "Output Ch 4"
+        Text[0x0055] = "Output Ch 5"
+        Text[0x0056] = "Output Ch 6"
+    end
+    
 
     if (rxId ~= RX.FC6250HX) then  -- Restrictions for non FC6250HX
         List_Values[0x0051]=servoOutputValues
@@ -1250,6 +1506,7 @@ local function DSM_Init_Text(rxId)
     Text[0x0078] = "FM Channel"
     if (rxId ~= RX.FC6250HX) then List_Values[0x0078]=channelValues end --FC6250HX uses other range
 
+    Text[0x007F] = "Attitude Gain" -- AR636B 
     Text[0x0080] = "Orientation"
     Text[0x0082] = "Heading"
     Text[0x0085] = "Frame Rate"
@@ -1279,7 +1536,7 @@ local function DSM_Init_Text(rxId)
     Text[0x009A] = "Capture Failsafe Positions"
     Text[0x009C] = "Custom Failsafe"
 
-    Text[0x009F] = "Save Settings " -- Save & Reboot RX 
+    Text[0x009F] = "Save Settings" -- Save & Reboot RX 
 
     Text[0x00A5] = "First Time Setup"
     Text[0x00AA] = "Capture Gyro Gains"
@@ -1292,41 +1549,45 @@ local function DSM_Init_Text(rxId)
 
     -- Flight Modes List Options 
     List_Text[0x00B5] = "Inhibit"
-    for i = 1, 10 do List_Text[0x00B5 + i] = "Flight Mode " .. i end
+    for i = 1, 10 do List_Text[0x00B5 + i] = "F Mode " .. i end
 
     Text[0x00BE] = "Unknown_BE" -- Used in Reset menu (0x0001) while the RX is rebooting
 
     Text[0x00C7] = "Calibrate Sensor"
     Text[0x00C8] = "Complete" -- FC6250HX calibration complete 
     Text[0x00CA] = "SAFE/Panic Mode Setup"
-    Text[0x00CD] = "Level model and capture attiude/M"; -- Different from List_Text , and force it to be a menu button
+    Text[0x00CD] = "Level model and capture attitude/m"; -- Different from List_Text , and force it to be a menu button
+
+    if LCD_W <= 128 then -- Override for small screens
+        Text[0x00CD] = "Level model, cap attitude/m"; -- Different from List_Text , and force it to be a menu button
+    end
 
     -- RX Orientations for AR631/AR637, Optionally attach an Image + Alt Text to display
-    List_Text[0x00CB] = "Position 1";  List_Text_Img[0x00CB]  = "rx_pos_1.png|Pilot View: RX Label Up, Pins Back" 
-    List_Text[0x00CC] = "Position 2";  List_Text_Img[0x00CC]  = "rx_pos_2.png|Pilot View: RX Label Left, Pins Back" 
-    List_Text[0x00CD] = "Position 3";  List_Text_Img[0x00CD]  = "rx_pos_3.png|Pilot View: RX Label Down, Pins Back" 
-    List_Text[0x00CE] = "Position 4";  List_Text_Img[0x00CE]  = "rx_pos_4.png|Pilot View: RX Label Right, Pins Back" 
-    List_Text[0x00CF] = "Position 5";  List_Text_Img[0x00CF]  = "rx_pos_5.png|Pilot View: RX Label UP, Pins to Front" 
-    List_Text[0x00D0] = "Position 6";  List_Text_Img[0x00D0]  = "rx_pos_6.png|Pilot View: RX Label Left, Pins Front" 
-    List_Text[0x00D1] = "Position 7";  List_Text_Img[0x00D1]  = "rx_pos_7.png|Pilot View: RX Label Down, Pins Front" 
-    List_Text[0x00D2] = "Position 8";  List_Text_Img[0x00D2]  = "rx_pos_8.png|Pilot View: RX Label Right, Pins Front" 
-    List_Text[0x00D3] = "Position 9";  List_Text_Img[0x00D3]  = "rx_pos_9.png|Pilot View: RX Label Up, Pins Left" 
-    List_Text[0x00D4] = "Position 10"; List_Text_Img[0x00D4]  = "rx_pos_10.png|Pilot View: RX Label Back, Pins Left" 
-    List_Text[0x00D5] = "Position 11"; List_Text_Img[0x00D5]  = "rx_pos_11.png|Pilot View: RX Label Down, Pins Left" 
-    List_Text[0x00D6] = "Position 12"; List_Text_Img[0x00D6]  = "rx_pos_12.png|Pilot View: RX Label Front, Pins Left" 
-    List_Text[0x00D7] = "Position 13"; List_Text_Img[0x00D7]  = "rx_pos_13.png|Pilot View: RX Label Up, Pins Right" 
-    List_Text[0x00D8] = "Position 14"; List_Text_Img[0x00D8]  = "rx_pos_14.png|Pilot View: RX Label Back, Pins Right" 
-    List_Text[0x00D9] = "Position 15"; List_Text_Img[0x00D9]  = "rx_pos_15.png|Pilot View: RX Label Down, Pins Right" 
-    List_Text[0x00DA] = "Position 16"; List_Text_Img[0x00DA]  = "rx_pos_16.png|Pilot View: RX Label Front, Pins Right" 
-    List_Text[0x00DB] = "Position 17"; List_Text_Img[0x00DB]  = "rx_pos_17.png|Pilot View: RX Label Back, Pins Down" 
-    List_Text[0x00DC] = "Position 18"; List_Text_Img[0x00DC]  = "rx_pos_18.png|Pilot View: RX Label Left, Pins Down" 
-    List_Text[0x00DD] = "Position 19"; List_Text_Img[0x00DD]  = "rx_pos_19.png|Pilot View: RX Label Front, Pins Down" 
-    List_Text[0x00DE] = "Position 20"; List_Text_Img[0x00DE]  = "rx_pos_20.png|Pilot View: RX Label Right, Pins Down" 
-    List_Text[0x00DF] = "Position 21"; List_Text_Img[0x00DF]  = "rx_pos_21.png|Pilot View: RX Label Back, Pins Up" 
-    List_Text[0x00E0] = "Position 22"; List_Text_Img[0x00E0]  = "rx_pos_22.png|Pilot View: RX Label Left, Pins Up" 
-    List_Text[0x00E1] = "Position 23"; List_Text_Img[0x00E1]  = "rx_pos_23.png|Pilot View: RX Label Front, Pins Up" 
-    List_Text[0x00E2] = "Position 24"; List_Text_Img[0x00E2]  = "rx_pos_24.png|Pilot View: RX Label Right, Pins Up" 
-    List_Text[0x00E3] = "Position Invalid";  List_Text_Img[0x00E3]  = "rx_pos_25.png|Cannot detect orientation of RX" 
+    List_Text[0x00CB] = "Pos 1";  List_Text_Img[0x00CB]  = "rx_pos_1.png|Pilot View: RX Label Up, Pins Back" 
+    List_Text[0x00CC] = "Pos 2";  List_Text_Img[0x00CC]  = "rx_pos_2.png|Pilot View: RX Label Left, Pins Back" 
+    List_Text[0x00CD] = "Pos 3";  List_Text_Img[0x00CD]  = "rx_pos_3.png|Pilot View: RX Label Down, Pins Back" 
+    List_Text[0x00CE] = "Pos 4";  List_Text_Img[0x00CE]  = "rx_pos_4.png|Pilot View: RX Label Right, Pins Back" 
+    List_Text[0x00CF] = "Pos 5";  List_Text_Img[0x00CF]  = "rx_pos_5.png|Pilot View: RX Label UP, Pins to Front" 
+    List_Text[0x00D0] = "Pos 6";  List_Text_Img[0x00D0]  = "rx_pos_6.png|Pilot View: RX Label Left, Pins Front" 
+    List_Text[0x00D1] = "Pos 7";  List_Text_Img[0x00D1]  = "rx_pos_7.png|Pilot View: RX Label Down, Pins Front" 
+    List_Text[0x00D2] = "Pos 8";  List_Text_Img[0x00D2]  = "rx_pos_8.png|Pilot View: RX Label Right, Pins Front" 
+    List_Text[0x00D3] = "Pos 9";  List_Text_Img[0x00D3]  = "rx_pos_9.png|Pilot View: RX Label Up, Pins Left" 
+    List_Text[0x00D4] = "Pos 10"; List_Text_Img[0x00D4]  = "rx_pos_10.png|Pilot View: RX Label Back, Pins Left" 
+    List_Text[0x00D5] = "Pos 11"; List_Text_Img[0x00D5]  = "rx_pos_11.png|Pilot View: RX Label Down, Pins Left" 
+    List_Text[0x00D6] = "Pos 12"; List_Text_Img[0x00D6]  = "rx_pos_12.png|Pilot View: RX Label Front, Pins Left" 
+    List_Text[0x00D7] = "Pos 13"; List_Text_Img[0x00D7]  = "rx_pos_13.png|Pilot View: RX Label Up, Pins Right" 
+    List_Text[0x00D8] = "Pos 14"; List_Text_Img[0x00D8]  = "rx_pos_14.png|Pilot View: RX Label Back, Pins Right" 
+    List_Text[0x00D9] = "Pos 15"; List_Text_Img[0x00D9]  = "rx_pos_15.png|Pilot View: RX Label Down, Pins Right" 
+    List_Text[0x00DA] = "Pos 16"; List_Text_Img[0x00DA]  = "rx_pos_16.png|Pilot View: RX Label Front, Pins Right" 
+    List_Text[0x00DB] = "Pos 17"; List_Text_Img[0x00DB]  = "rx_pos_17.png|Pilot View: RX Label Back, Pins Down" 
+    List_Text[0x00DC] = "Pos 18"; List_Text_Img[0x00DC]  = "rx_pos_18.png|Pilot View: RX Label Left, Pins Down" 
+    List_Text[0x00DD] = "Pos 19"; List_Text_Img[0x00DD]  = "rx_pos_19.png|Pilot View: RX Label Front, Pins Down" 
+    List_Text[0x00DE] = "Pos 20"; List_Text_Img[0x00DE]  = "rx_pos_20.png|Pilot View: RX Label Right, Pins Down" 
+    List_Text[0x00DF] = "Pos 21"; List_Text_Img[0x00DF]  = "rx_pos_21.png|Pilot View: RX Label Back, Pins Up" 
+    List_Text[0x00E0] = "Pos 22"; List_Text_Img[0x00E0]  = "rx_pos_22.png|Pilot View: RX Label Left, Pins Up" 
+    List_Text[0x00E1] = "Pos 23"; List_Text_Img[0x00E1]  = "rx_pos_23.png|Pilot View: RX Label Front, Pins Up" 
+    List_Text[0x00E2] = "Pos 24"; List_Text_Img[0x00E2]  = "rx_pos_24.png|Pilot View: RX Label Right, Pins Up" 
+    List_Text[0x00E3] = "Pos Invalid";  List_Text_Img[0x00E3]  = "rx_pos_25.png|Cannot detect orientation of RX" 
 
     Text[0x00D1] = "Receiver will Reboot/b" 
     --FC6250HX
@@ -1355,13 +1616,13 @@ local function DSM_Init_Text(rxId)
     List_Text[0x00F3] = "Adjustable"
 
     Text[0x00F9] = "Gyro settings"
-    Text[0x00FE] = "Stick Priority/c/b " --SubTitle
+    Text[0x00FE] = "Stick Priority/c/b" --SubTitle
 
     Text[0x0100] = "Make sure the model has been"
-    Text[0x0101] = "configured, including wing type,"
-    Text[0x0102] = "reversing, travel, trimmed, etc."
-    Text[0x0103] = "before continuing setup."
-    Text[0x0104] = "" -- empty??
+    Text[0x0101] = "configured, including wing"
+    Text[0x0102] = "type, reversing, travel,"
+    Text[0x0103] = "trimmed, etc. before "
+    Text[0x0104] = "continuing setup."
     Text[0x0105] = "" -- empty??
 
     Text[0x0106] = "Any wing type, channel assignment,"
@@ -1371,7 +1632,7 @@ local function DSM_Init_Text(rxId)
     Text[0x010A] = "" -- empty??
     Text[0x010B] = "" -- empty??
     
-    Text[0x0190] = "Warning! Relearn Servo Settings"
+    Text[0x0190] = "Relearn Model/Servo Settings (TX->RX)"
     Text[0x019C] = "Enter Receiver Bind Mode"
     Text[0x01D7] = "SAFE Select Channel"
     Text[0x01DC] = "AS3X/c/b"       -- Subtitle, Center+bold 
@@ -1396,7 +1657,7 @@ local function DSM_Init_Text(rxId)
     --Inh, Self-Level/Angle Dem, Envelope -- (L_M was wide open range 0->244)
     Text[0x01F8] = "Safe Mode";    List_Values[0x01F8]=safeModeOptions 
 
-    Text[0x01F9] = "SAFE Select/c/b "  -- SubTitle
+    Text[0x01F9] = "SAFE Select/c/b"  -- SubTitle
     Text[0x01FC] = "Panic Flight Mode"
     Text[0x01FD] = "SAFE Failsafe FMode"
     Text[0x0208] = "Decay"
@@ -1426,7 +1687,7 @@ local function DSM_Init_Text(rxId)
     Text[0x0223] = "and try again."
     
     Text[0x0224] = "Continue"
-    Text[0x0226] = "Angle Limits/c/b "
+    Text[0x0226] = "Angle Limits/c/b"
     Text[0x0227] = "Other settings"
     Text[0x0229] = "Set Orientation Manually"
 
@@ -1456,6 +1717,7 @@ local function DSM_Init_Text(rxId)
     Text[0x023D] = "Copy Flight Mode Settings"
     Text[0x023E] = "Source Flight Mode"
     Text[0x023F] = "Target Flight Mode"
+
     Text[0x0240] = "Utilities"
 
     -- Gain Capture Page
@@ -1498,9 +1760,9 @@ local function DSM_Init_Text(rxId)
     Text[0x026A] = "Use CAUTION for Yaw gain!/b" -- SubTitle
 
     Text[0x8000] = "Flight Mode/c/b"  --FC6250HX:   1=NORMAL 2= Stunt-1, 3=Stunt-2, 4=Hold
-    Text[0x8001] = "Flight Mode/c/b"  -- WAS "Flight Mode 1".. This usually is a Flight Mode w value relative to 0 (AR631/AR637)
-    Text[0x8002] = "Flight Mode 2/c/b" -- what RX does this show up??
-    Text[0x8003] = "Flight Mode 3/c/b"
+    Text[0x8001] = "Flight Mode/c/b"  --AR63X family:  WAS "Flight Mode 1".. This usually is a Flight Mode w value relative to 0 (AR631/AR637)
+    Text[0x8002] = "Flight Mode/c/b" -- what RX does this show up??
+    Text[0x8003] = "Flight Mode/c/b"
 end
 
 -- Adjust the displayed value for Flight mode line as needed
@@ -1523,14 +1785,14 @@ local function GetFlightModeValue(line)
             end
         else
             -- No adjustment needed
-            out = header .. " " .. value
+            out = header .. " " .. (value + 1)
         end
     elseif (textId == 0x8001) then -- AR630-637, AR8360T, AR10360T
         -- Seems that we really have to add +1 to the value, so Flight Mode 0 is Really Flight Mode 1
         out = header .. " " .. (value + 1)
     else
         -- Default, return the value as we Have it 
-        out = header .. " " .. value
+        out = header .. " " .. (value + 1)
     end
     return out
 end
@@ -1543,6 +1805,7 @@ Lib.PHASE       = PHASE
 Lib.LINE_TYPE   = LINE_TYPE
 Lib.RX          = RX
 Lib.DISP_ATTR   = DISP_ATTR
+Lib.CH_TYPE     = CH_TYPE
 
 Lib.BACK_BUTTON = BACK_BUTTON
 Lib.NEXT_BUTTON = NEXT_BUTTON
@@ -1551,6 +1814,7 @@ Lib.MAX_MENU_LINES = MAX_MENU_LINES
 
 -- Export Shared Context Variables
 Lib.DSM_Context = DSM_Context
+Lib.MODEL = MODEL
 
 -- Export Functions
 Lib.LOG_write = LOG_write
@@ -1564,6 +1828,7 @@ Lib.phase2String = phase2String
 Lib.lineValue2String = lineValue2String
 Lib.menu2String = menu2String
 Lib.menuLine2String = menuLine2String
+Lib.channelType2String = channelType2String
 
 Lib.isSelectableLine = isSelectableLine
 Lib.isEditableLine = isEditableLine
@@ -1588,5 +1853,7 @@ Lib.MoveSelectionLine = DSM_MoveSelectionLine
 Lib.Send_Receive = DSM_Send_Receive
 Lib.Init = DSM_Init
 Lib.Init_Text = DSM_Init_Text
+
+Lib.SetDSMChannelInfo = DSM_SetDSMChannelInfo
 
 return Lib

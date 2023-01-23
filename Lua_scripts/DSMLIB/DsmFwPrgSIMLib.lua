@@ -664,6 +664,7 @@ local function AR631_loadMenu(menuId)
         ctx.MenuLines[1] = { Type = LINE_TYPE.MENU, TextId = 0x0101, ValId = 0x104F }
         ctx.MenuLines[2] = { Type = LINE_TYPE.MENU, TextId = 0x0102, ValId = 0x104F }
         ctx.MenuLines[3] = { Type = LINE_TYPE.MENU, TextId = 0x0103, ValId = 0x104F }
+        ctx.MenuLines[4] = { Type = LINE_TYPE.MENU, TextId = 0x0104, ValId = 0x104F }
         ctx.SelLine = dsmLib.NEXT_BUTTON
         lastGoodMenu = menuId
     elseif (menuId==0x1050) then  
@@ -679,6 +680,7 @@ local function AR631_loadMenu(menuId)
         ctx.MenuLines[1] = { Type = LINE_TYPE.MENU, TextId = 0x0107, ValId = 0x1050 }
         ctx.MenuLines[2] = { Type = LINE_TYPE.MENU, TextId = 0x0108, ValId = 0x1050 }
         ctx.MenuLines[3] = { Type = LINE_TYPE.MENU, TextId = 0x0109, ValId = 0x1050 }
+        ctx.MenuLines[4] = { Type = LINE_TYPE.MENU, TextId = 0x010A, ValId = 0x1050 }
         ctx.SelLine = dsmLib.NEXT_BUTTON
         lastGoodMenu = menuId
     elseif (menuId==0x1051) then 
@@ -848,7 +850,7 @@ local function AR631_loadMenu(menuId)
         --L[#3 T=LM VId=0x1003 Text="SAFE"[0xDA] val=0 NL=(0->0,0,S=1) [1->1,1] MId=0x105C ]
         --L[#6 T=LM VId=0x1006 Text="SAFE Select"[0x1F9] val=0 NL=(0->1,1,S=1) [1->2,1]  MId=0x105C ]
 
-        ctx.Menu = { MenuId = 0x105C, TextId = 0x1DE, PrevId = 0, NextId = 0, BackId = 0x1010 }
+        ctx.Menu = { MenuId = 0x105C, TextId = 0x01F9, PrevId = 0, NextId = 0, BackId = 0x1010 }
         ctx.MenuLines[0] = { Type = LINE_TYPE.VALUE_NUM_I8_NC, TextId = 0x8001, ValId = 0x1000, Min=0, Max=10, Def=0, Val=1 }
         ctx.MenuLines[1] = { Type = LINE_TYPE.LIST_MENU, TextId = 0x1D7, ValId = 0x1001, Min=53, Max=85, Def=53, Val=5 }
         ctx.MenuLines[2] = { Type = LINE_TYPE.LIST_MENU, TextId = 0x1DC, ValId = 0x1002, Min=1, Max=2, Def=1, Val=1  }
@@ -1338,7 +1340,6 @@ local function loadMenu(menuId)
         ctx.MenuLines[0] = { MenuId = 0x1000, Type = LINE_TYPE.MENU, Text = "AR630/631/637 (NEW)", ValId = 0x1001,TextId=0 }
         ctx.MenuLines[1] = { MenuId = 0x1000, Type = LINE_TYPE.MENU, Text = "AR630/631/637 (INITIALIZED)", ValId = 0x1002,  TextId=0 }
         ctx.MenuLines[4] = { MenuId = 0x1000, Type = LINE_TYPE.MENU, Text = "FC6250HX", ValId = 0x1005, TextId=0 }
-        ctx.MenuLines[6] = { MenuId = 0x1000, Type = LINE_TYPE.MENU, Text = "EXIT Sim to Real RX", ValId = 0xFFFF, TextId=0 }  -- Menu 0xFFFF to Exit Simulator 
 
         ctx.SelLine = 0
         lastGoodMenu = menuId

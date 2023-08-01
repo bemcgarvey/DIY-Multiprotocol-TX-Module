@@ -269,6 +269,7 @@
 	#undef	LOSI_CYRF6936_INO
 	#undef	MLINK_CYRF6936_INO
 	#undef	TRAXXAS_CYRF6936_INO
+	#undef	SCORPIO_CYRF6936_INO
 	#undef	WFLY_CYRF6936_INO
 	#undef	WK2x01_CYRF6936_INO
 #endif
@@ -358,7 +359,7 @@
 #if not defined(STM32_BOARD)
 	#undef SX1276_INSTALLED
 #endif
-#ifndef SX1276_INSTALLED || defined MULTI_EU
+#if not defined(SX1276_INSTALLED) || defined MULTI_EU
 	#undef FRSKYR9_SX1276_INO
 #endif
 

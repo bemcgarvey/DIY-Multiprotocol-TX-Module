@@ -134,6 +134,7 @@ CFlie|38|CFlie||||||||NRF24L01|
 [Realacc](Protocols_Details.md#Realacc---76)|76|R11||||||||NRF24L01|
 [Redpine](Protocols_Details.md#Redpine---50)|50|FAST|SLOW|||||||NRF24L01|XN297
 [Scanner](Protocols_Details.md#Scanner---54)|54|||||||||CC2500|
+[Scorpio](Protocols_Details.md#Scorpio---94)|94|||||||||CYRF6936|
 [Shenqi](Protocols_Details.md#Shenqi---19)|19|Shenqi||||||||NRF24L01|LT8900
 [Skyartec](Protocols_Details.md#Skyartec---68)|68|||||||||CC2500|CC2500
 [SLT](Protocols_Details.md#SLT---11)|11|SLT_V1|SLT_V2|Q100|Q200|MR100||||NRF24L01|CC2500
@@ -520,18 +521,18 @@ Here is a table detailling the different RX output ranges based on the radio set
 ![Image](/docs/images/DSM_RX_Output.JPG)
 
 ### Sub_protocol DSM2_1F - *0*
-DSM2, Resolution 1024, servo refresh rate can only be 22ms
+Air DSM2, Resolution 1024, servo refresh rate can only be 22ms
 ### Sub_protocol DSM2_2F - *1*
-DSM2, Resolution 2048, servo refresh rate can be 22 or 11ms. 11ms won't be available on all servo outputs when more than 7 channels are used.
+Air DSM2, Resolution 2048, servo refresh rate can be 22 or 11ms. 11ms won't be available on all servo outputs when more than 7 channels are used.
 ### Sub_protocol DSMX_1F - *2*
-DSMX, Resolution 2048, servo refresh rate can only be 22ms
+Air DSMX, Resolution 2048, servo refresh rate can only be 22ms
 ### Sub_protocol DSMX_2F - *3*
-DSMX, Resolution 2048, servo refresh rate can be 22 or 11ms. 11ms won't be available on all servo outputs when more than 7 channels are used.
+Air DSMX, Resolution 2048, servo refresh rate can be 22 or 11ms. 11ms won't be available on all servo outputs when more than 7 channels are used.
 ### Sub_protocol AUTO - *4*
-"AUTO" is recommended to automatically select the best settings for your DSM2 and DSMX RXs.
+"AUTO" is recommended to automatically select the best settings for your air DSM2 and DSMX RXs.
 
 ### Sub_protocol DSMR_1F - *5*
-DSMR receivers
+Surface DSMR receivers
 
 **Only 22 IDs available**, use RX num to cycle through them.
 
@@ -615,7 +616,7 @@ Calib is the same as the original radio with both sticks down and to the left in
 Models: Eachine E129/E130 and Twister Ninja 250
 
 ### Sub_protocol C186 - *1*
-Models: C186/E120, C127/E110, K127
+Models: C186/E120, C127/E110, K127, C159
 
 The FC of the heli seems to store the trims Trim A/E/R=CH7..9. If you use these trims, make sure to center them after powering off the heli or they will be added to the previous trims and over correct.
 
@@ -650,6 +651,13 @@ Telemetry: the 2 RXs I have are sending different information in different forma
 CH1|CH2|CH3|CH4|CH5|CH6|CH7|CH8|CH9|CH10|CH11|CH12|CH13|CH14|CH15|CH16
 ---|---|---|---|---|---|---|---|---|----|----|----|----|----|----|----
 CH1|CH2|CH3|CH4|CH5|CH6|CH7|CH8|CH9|CH10|CH11|CH12|CH13|CH14|CH15|CH16
+
+## Scorpio - *94*
+Model Scorpio Falco 300, TX:Nine Eagles 4CH-TX, RX:Nine Eagles 4CH-RX
+
+CH1|CH2|CH3|CH4
+---|---|---|---
+A|E|T|R
 
 ## Traxxas - *43*
 Receiver 6519
